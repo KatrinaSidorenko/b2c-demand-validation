@@ -48,6 +48,11 @@ class Granularity(StrEnum):
     MONTHLY = "monthly"
 
 
+# Granularities each endpoint accepts.
+ARTICLE_GRANULARITIES = frozenset({Granularity.DAILY, Granularity.MONTHLY})
+AGGREGATE_GRANULARITIES = frozenset({Granularity.HOURLY, Granularity.DAILY, Granularity.MONTHLY})
+
+
 class ErrorType(StrEnum):
     INVALID_ARGUMENT = "invalid_argument"  # bad input, request was not sent
     NETWORK_ERROR = "network_error"  # connection failure or timeout

@@ -1,6 +1,6 @@
 """Contracts for the data resolver layer.
 
-Business-level inputs (subjects, periods) and the clean daily series the
+Business-level inputs (subjects, periods) and the clean time series the
 resolver returns to the metrics layer. This module has no I/O.
 """
 
@@ -48,22 +48,31 @@ class SeriesRequest:
 
 
 @dataclass(frozen=True)
-class DailySeries:
-    dates: list[str]  # ISO dates, one per day of the period
+class TimeSeries:
+    """One point per bucket of the period.
+
+    `dates` are ISO strings: "2026-08-01" for daily, the first of the month
+    ("2026-08-01") for monthly, "2026-08-01T13:00" for hourly.
+    """
+
+    granularity: Granularity
+    dates: list[str]
     views: list[int]
 
 
 @dataclass(frozen=True)
 class Coverage:
-    expected_days: int
-    returned_days: int
+    """Counts buckets (days, months or hours, matching the series granularity)."""
+
+    expected_points: int
+    returned_points: int
     missing_dates: list[str]
 
 
 @dataclass(frozen=True)
 class SeriesBundle:
     subject: Subject
-    series: DailySeries
+    series: TimeSeries
     coverage: Coverage
     errors: list[ApiError] = field(default_factory=list)
-    per_article: dict[str, DailySeries] = field(default_factory=dict)
+    per_article: dict[str, TimeSeries] = field(default_factory=dict)
