@@ -29,7 +29,7 @@ Run the scripts from `scripts/`.
    - Exit code 0: a report with one result per metric (and per subject for per-subject metrics), and a `summary` listing the results by reliability level.
 
 ## Available metrics
-None yet. Each metric step adds its line here.
+- `interest_volume`: how big is the interest in a subject? Total, average and median daily views, banded niche / moderate / significant / mass by the median. Needs a period of at least 28 days; 12 months recommended. Don't compare its values across language projects.
 
 ## Reliability rules
 Every result has `value`, `unit`, a code-generated `interpretation`, and `reliability` with a `level` (`high`, `medium`, `low`, `invalid`), `usable_for_claims`, and the `checks` behind it.
