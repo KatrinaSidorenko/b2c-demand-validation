@@ -17,6 +17,9 @@ from urllib.parse import quote
 
 T = TypeVar("T")
 
+# The pageviews endpoints serve data starting on this date.
+PAGEVIEWS_MIN_DATE = "2015-07-01"
+
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -43,6 +46,11 @@ class Granularity(StrEnum):
     HOURLY = "hourly"
     DAILY = "daily"
     MONTHLY = "monthly"
+
+
+# Granularities each endpoint accepts.
+ARTICLE_GRANULARITIES = frozenset({Granularity.DAILY, Granularity.MONTHLY})
+AGGREGATE_GRANULARITIES = frozenset({Granularity.HOURLY, Granularity.DAILY, Granularity.MONTHLY})
 
 
 class ErrorType(StrEnum):
