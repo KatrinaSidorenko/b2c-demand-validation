@@ -21,6 +21,7 @@ from wiki_contracts import (
     ApiError,
     ArticlePageviewsRequest,
     ErrorType,
+    PAGEVIEWS_MIN_DATE,
     Granularity,
     PageviewPoint,
     Result,
@@ -152,6 +153,10 @@ def _validate(period: Period, granularity: Granularity) -> tuple[list[str], ApiE
         return [], _invalid_argument(str(exc))
     if start > end:
         return [], _invalid_argument(f"Period start {period.start} is after end {period.end}")
+    if start < date.fromisoformat(PAGEVIEWS_MIN_DATE):
+        return [], _invalid_argument(
+            f"Period start {period.start} is before {PAGEVIEWS_MIN_DATE}, the earliest date with pageviews data"
+        )
     return [(start + timedelta(days=i)).isoformat() for i in range((end - start).days + 1)], None
 
 

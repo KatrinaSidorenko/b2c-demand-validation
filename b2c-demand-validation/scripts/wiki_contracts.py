@@ -17,6 +17,9 @@ from urllib.parse import quote
 
 T = TypeVar("T")
 
+# The pageviews endpoints serve data starting on this date.
+PAGEVIEWS_MIN_DATE = "2015-07-01"
+
 
 # ---------------------------------------------------------------------------
 # Enums
