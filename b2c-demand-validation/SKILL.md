@@ -29,6 +29,7 @@ Run `python scripts/metrics.py catalog --format short` to see the metrics that e
 |---|---|
 | How big is the interest? | `interest_volume` |
 | Is interest growing or falling? | `growth_rate` |
+| Is that growth or decline steady, or caused by one event? | `trend` |
 | Is interest steady or news-driven? | `volatility` (not available yet) |
 | Which option gets the most attention? | `share_of_voice` (not available yet) |
 | When in the year is interest highest? | `seasonality` (not available yet) |
@@ -103,3 +104,4 @@ Every result has `value`, `unit`, a code-generated `interpretation`, and `reliab
 ## Available metrics
 - `interest_volume`: how big is the interest in a subject? Total, average and median daily views, banded niche / moderate / significant / mass by the median. Needs a period of at least 28 days; 12 months recommended.
 - `growth_rate`: is interest growing or falling? The change in average daily views versus the baseline period, as a ratio (`0.34` = +34%), banded strong decline / decline / flat / growth / strong growth. Needs a period of at least 28 days; 12 months with `year_over_year` recommended. It includes changes in overall Wikipedia traffic. If `signal_vs_noise` warns, the change is within normal week-to-week fluctuation: don't call it growth or decline.
+- `trend`: is the direction of interest steady over the period? A straight line fitted to weekly (Monday to Sunday) views: the slope in % of an average week per month (rising above +1%, falling below -1%, flat in between) and R² for how consistent it is (consistent from 0.6, moderate 0.3 .. 0.6, not clear below 0.3). Needs at least 12 full weeks; 12 months recommended. It does not capture seasonality or turning points. Pair it with `growth_rate` to check that a change is sustained.

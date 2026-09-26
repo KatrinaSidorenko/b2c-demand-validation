@@ -19,7 +19,13 @@ from metrics_contracts import (
     PeriodUnit,
     Reliability,
 )
-from reliability import GENERIC_CHECKS, baseline_has_views, signal_vs_noise, spike_dominance
+from reliability import (
+    GENERIC_CHECKS,
+    baseline_has_views,
+    signal_vs_noise,
+    spike_dominance,
+    trend_signal_vs_noise,
+)
 
 CURRENT = DataRequirement()
 BASELINE = DataRequirement(kind=DataKind.BASELINE_SERIES)
@@ -155,6 +161,50 @@ GROWTH_RATE = MetricDefinition(
 
 
 # ---------------------------------------------------------------------------
+# trend
+# ---------------------------------------------------------------------------
+
+
+def _trend_compute(data: MetricData) -> dict[str, float]:
+    series = data.bundle(CURRENT).series
+    return metrics_calc.trend(metrics_calc.resample_weekly(series.dates, series.views))
+
+
+def _trend_interpret(value: dict[str, float], data: MetricData, reliability: Reliability) -> str:
+    slope, r2 = value["slope_pct_per_month"], value["r2"]
+    return (
+        f"Interest is {metrics_calc.trend_direction(slope)} at about {slope:+.1f}% a month; "
+        f"the trend is {metrics_calc.trend_consistency(r2)} (R² = {r2:.2f})."
+    )
+
+
+TREND = MetricDefinition(
+    id="trend",
+    title="Trend",
+    answers="Is the direction of interest steady over the period?",
+    use_when="Checking that growth or decline is sustained and not caused by a single event.",
+    do_not_use_when="The period is shorter than 12 weeks.",
+    interpretation_guide={
+        "direction": "slope > +1%/month rising, < -1%/month falling, otherwise flat",
+        "consistency": "r2 >= 0.6 consistent, 0.3 .. 0.6 moderate, < 0.3 no clear trend",
+    },
+    limitations="A straight line; it does not capture seasonality or turning points.",
+    inputs=[SUBJECTS_INPUT, PERIOD_INPUT],
+    min_period=PeriodLength(12, PeriodUnit.WEEKS),
+    recommended_period="12 months",
+    min_subjects=1,
+    scope=MetricScope.PER_SUBJECT,
+    unit="%/month",
+    output={"value": {"slope_pct_per_month": "float", "r2": "float [0, 1]"}, "unit": "%/month"},
+    data=[CURRENT],
+    compute=_trend_compute,
+    # spike_dominance stays in: a spike near either end of the period tilts the line.
+    checks=[*GENERIC_CHECKS, trend_signal_vs_noise],
+    interpret=_trend_interpret,
+)
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -166,4 +216,4 @@ def _verb(label: str, singular: str) -> str:
     return singular[:-1] if plural else singular
 
 
-REGISTRY: dict[str, MetricDefinition] = {d.id: d for d in [INTEREST_VOLUME, GROWTH_RATE]}
+REGISTRY: dict[str, MetricDefinition] = {d.id: d for d in [INTEREST_VOLUME, GROWTH_RATE, TREND]}
