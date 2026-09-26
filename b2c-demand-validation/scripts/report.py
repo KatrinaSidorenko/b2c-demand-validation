@@ -38,6 +38,7 @@ from reportlab.platypus import (
 )
 
 from metrics_contracts import CheckStatus, ReliabilityLevel, SpecError
+from metrics_registry import REGISTRY
 from report_contracts import MAX_BULLETS, REPORT_FIELDS, FieldKind, ReportText
 
 EXIT_OK = 0
@@ -45,6 +46,10 @@ EXIT_INVALID_REPORT = 2
 
 EXAMPLE_PATH = Path(__file__).resolve().parent.parent / "examples" / "report_text.json"
 PROXY_NOTE = "Wikipedia pageviews are a proxy for attention, not for sales or purchase intent."
+LEVELS_NOTE = (
+    "Reliability: high and medium results can be relied on; low is a weak signal; "
+    "invalid means the metric could not be measured."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +71,8 @@ def report_schema() -> dict[str, Any]:
             for f in REPORT_FIELDS
         ],
         "added_by_the_tool": [
-            "results table (subject, metric, interpretation, reliability)",
+            "results table (subject, metric title, interpretation, reliability)",
+            "a plain-language explanation of each metric used and of the reliability levels",
             "setup line (project, period, subjects, baseline)",
             "reliability summary and the checks that did not pass",
             "generation date and data source note",
@@ -210,6 +216,21 @@ def _answer_box(answer: str, s: dict[str, ParagraphStyle]) -> Table:
     return box
 
 
+def _metric_title(metric_id: str) -> str:
+    definition = REGISTRY.get(metric_id)
+    return definition.title if definition else metric_id
+
+
+def _metric_guide(results: list[dict[str, Any]]) -> list[str]:
+    """One plain-language line per metric in the results, then the reliability levels."""
+    lines = []
+    for metric_id in dict.fromkeys(r["metric"] for r in results):
+        definition = REGISTRY.get(metric_id)
+        if definition:
+            lines.append(f"{definition.title}: {definition.explainer}")
+    return [*lines, LEVELS_NOTE]
+
+
 def _results_table(results: list[dict[str, Any]], s: dict[str, ParagraphStyle]) -> Table:
     rows: list[list[Flowable]] = [[_p(h, s["cell_head"]) for h in ("Subject", "Metric", "Result", "Reliability")]]
     style = [
@@ -222,7 +243,7 @@ def _results_table(results: list[dict[str, Any]], s: dict[str, ParagraphStyle]) 
         rows.append(
             [
                 _p(r.get("subject") or "all subjects", s["cell"]),
-                _p(r["metric"], s["cell"]),
+                _p(_metric_title(r["metric"]), s["cell"]),
                 _p(r["interpretation"], s["cell"]),
                 _p(level, s["cell"]),
             ]
@@ -250,7 +271,7 @@ def _reliability_summary(report: dict[str, Any]) -> list[str]:
     lines = []
     for r in report["results"]:
         counts[r["reliability"]["level"]] += 1
-        name = f"{r.get('subject') or 'all subjects'} / {r['metric']}"
+        name = f"{r.get('subject') or 'all subjects'} / {_metric_title(r['metric'])}"
         for c in r["reliability"]["checks"]:
             if c["status"] != CheckStatus.PASS:
                 lines.append(f"{name}: {c['name']} {c['status']}: {c['detail']}")
@@ -279,7 +300,18 @@ def render_pdf(text: ReportText, report: dict[str, Any], out: Path, today: date)
         Spacer(1, 6),
         *_section("Problem", [_p(text.problem, s["body"])], s),
         *_section("Answer", [_answer_box(text.answer, s)], s),
-        *_section("Data", [_results_table(report["results"], s), Spacer(1, 4), _p(_setup_line(spec), s["meta"])], s),
+        *_section(
+            "Data",
+            [
+                _results_table(report["results"], s),
+                Spacer(1, 4),
+                _p(_setup_line(spec), s["meta"]),
+                Spacer(1, 4),
+                _p("How to read the metrics", s["cell_head"]),
+                *[_p(line, s["meta"]) for line in _metric_guide(report["results"])],
+            ],
+            s,
+        ),
         *_section("Analysis", [_bullets(text.analysis, s["body"])], s),
         *_section("Conclusions", [_bullets(text.conclusions, s["body"])], s),
         *_section(
