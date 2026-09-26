@@ -21,6 +21,13 @@ TREND_CONSISTENCY_BANDS = [(0.3, "not clear"), (0.6, "moderate")]
 TREND_TOP_CONSISTENCY = "consistent"
 WEEKS_PER_MONTH = 52 / 12
 
+# volatility bands, on the coefficient of variation: each band holds values below its upper bound
+VOLATILITY_BANDS = [(0.3, "stable"), (0.7, "moderately volatile")]
+VOLATILITY_TOP_BAND = "volatile"
+# volatility spike days: above median + this many median absolute deviations
+SPIKE_MAD_MULTIPLIER = 5
+SPIKE_MAX_DATES = 5
+
 # growth_rate bands, on the ratio: each band holds values below its upper bound
 GROWTH_BANDS = [(-0.2, "strong decline"), (-0.05, "decline"), (0.05, "flat"), (0.2, "growth")]
 GROWTH_TOP_BAND = "strong growth"
@@ -127,3 +134,28 @@ def trend_consistency(r2: float) -> str:
         if r2 < upper:
             return band
     return TREND_TOP_CONSISTENCY
+
+
+def volatility(dates: list[str], views: list[int]) -> dict[str, float | list[str] | None]:
+    """Coefficient of variation, max / median ratio and the strongest spike days of a daily series.
+
+    cv is None when the series has no views, spike_ratio when the median is 0.
+    Spike days are above median + 5 × MAD: at most 5, the biggest first.
+    """
+    avg, mid = mean(views), median(views)
+    mad = median(abs(v - mid) for v in views)
+    threshold = mid + SPIKE_MAD_MULTIPLIER * mad
+    spikes = sorted(((v, d) for d, v in zip(dates, views) if v > threshold), reverse=True)
+    return {
+        "cv": round(stdev(views) / avg, 2) if avg else None,
+        "spike_ratio": round(max(views) / mid, 1) if mid else None,
+        "spike_dates": [d for _, d in spikes[:SPIKE_MAX_DATES]],
+    }
+
+
+def volatility_band(cv: float) -> str:
+    """stable < 0.3, moderately volatile 0.3 .. 0.7, volatile above."""
+    for upper, band in VOLATILITY_BANDS:
+        if cv < upper:
+            return band
+    return VOLATILITY_TOP_BAND
