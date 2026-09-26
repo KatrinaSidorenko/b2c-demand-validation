@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import calendar
 from datetime import date
+from typing import Callable
 from urllib.parse import unquote
 
 import metrics_calc
@@ -23,7 +24,7 @@ from metrics_contracts import (
     ReliabilityLevel,
 )
 from resolver_contracts import SeriesBundle, TimeSeries
-from wiki_contracts import ApiError, Granularity
+from wiki_contracts import Access, ApiError, Granularity
 
 # data_coverage: returned points / expected points
 COVERAGE_WARN_BELOW = 0.95
@@ -50,6 +51,9 @@ TREND_MIN_R2 = 0.3
 # seasonal_consistency: mean correlation between the monthly profiles of the years
 SEASONAL_CONSISTENCY_WARN_BELOW = 0.5
 SEASONAL_CONSISTENCY_FAIL_BELOW = 0.0
+
+# platform checks: a failure of these accesses invalidates the mix; mobile app data is sparse
+REQUIRED_ACCESSES = frozenset({Access.DESKTOP, Access.MOBILE_WEB})
 
 # aggregation: this many warns make a result "low"
 LOW_LEVEL_MIN_WARNS = 2
@@ -185,12 +189,12 @@ def signal_vs_noise(data: MetricData) -> ReliabilityCheck:
 
 def subject_min_volume(data: MetricData) -> ReliabilityCheck:
     """min_volume on the subject series only: the project series is always large."""
-    return min_volume(_without_kinds(data, PROJECT_KINDS))
+    return min_volume(_select(data, lambda r: r.kind not in PROJECT_KINDS))
 
 
 def subject_spike_dominance(data: MetricData) -> ReliabilityCheck:
     """spike_dominance on the subject series only."""
-    return spike_dominance(_without_kinds(data, PROJECT_KINDS))
+    return spike_dominance(_select(data, lambda r: r.kind not in PROJECT_KINDS))
 
 
 def relative_signal_vs_noise(data: MetricData) -> ReliabilityCheck:
@@ -260,6 +264,43 @@ def seasonal_consistency(data: MetricData) -> ReliabilityCheck:
     if r < SEASONAL_CONSISTENCY_WARN_BELOW:
         return ReliabilityCheck("seasonal_consistency", CheckStatus.WARN, f"{detail}: the pattern changes year to year")
     return ReliabilityCheck("seasonal_consistency", CheckStatus.PASS, detail)
+
+
+# ---------------------------------------------------------------------------
+# Platform checks (per-access series)
+# ---------------------------------------------------------------------------
+
+
+def platform_coverage(data: MetricData) -> ReliabilityCheck:
+    """data_coverage on desktop and mobile web; mobile app data is sparse for many articles."""
+    return data_coverage(_select(data, lambda r: r.access in REQUIRED_ACCESSES))
+
+
+def platform_min_volume(data: MetricData) -> ReliabilityCheck:
+    """min_volume on the combined series of all platforms: a small platform share is a result, not noise."""
+    bundles = [bundle for by_label in data.bundles.values() for bundle in by_label.values()]
+    first = bundles[0]
+    views = [sum(views) for views in zip(*(bundle.series.views for bundle in bundles))]
+    combined = SeriesBundle(
+        subject=first.subject,
+        series=TimeSeries(granularity=first.series.granularity, dates=first.series.dates, views=views),
+        coverage=first.coverage,
+    )
+    requirement = DataRequirement(granularity=first.series.granularity)
+    return min_volume(MetricData(spec=data.spec, subjects=data.subjects, bundles={requirement: {"": combined}}))
+
+
+def platform_fetch_errors(data: MetricData) -> ReliabilityCheck:
+    """fetch_errors on desktop and mobile web; a mobile app error only warns, the share then comes without it."""
+    required = fetch_errors(_select(data, lambda r: r.access in REQUIRED_ACCESSES))
+    app = fetch_errors(_select(data, lambda r: r.access not in REQUIRED_ACCESSES))
+    if app.status == CheckStatus.PASS:
+        return required
+    statuses = [required.status, CheckStatus.WARN]
+    parts = [] if required.status == CheckStatus.PASS else [required.detail]
+    sparse = "app data is sparse, so the app share may be missing or understated"
+    parts.append(f"{Access.MOBILE_APP}: {app.detail}; {sparse}")
+    return _combine("fetch_errors", statuses, parts)
 
 
 # ---------------------------------------------------------------------------
@@ -333,16 +374,17 @@ def _bundle_of_kind(data: MetricData, kind: DataKind) -> SeriesBundle | None:
     return None
 
 
-def _without_kinds(data: MetricData, kinds: frozenset[DataKind]) -> MetricData:
-    """The same data without the bundles of these kinds."""
-    bundles = {r: by_label for r, by_label in data.bundles.items() if r.kind not in kinds}
+def _select(data: MetricData, keep: Callable[[DataRequirement], bool]) -> MetricData:
+    """The same data with only the bundles whose requirement passes `keep`."""
+    bundles = {r: by_label for r, by_label in data.bundles.items() if keep(r)}
     return MetricData(spec=data.spec, subjects=data.subjects, bundles=bundles)
 
 
 def _requirement_name(requirement: DataRequirement) -> str:
+    """The kind ("current", "project baseline"), or only the access for a per-access current series."""
     name = requirement.kind.removesuffix("_series").replace("_", " ")
     if requirement.access != DataRequirement().access:
-        name += f" {requirement.access}"
+        return requirement.access if requirement.kind == DataKind.CURRENT else f"{name} {requirement.access}"
     return name
 
 

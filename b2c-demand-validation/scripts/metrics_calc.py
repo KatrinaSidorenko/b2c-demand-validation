@@ -41,6 +41,10 @@ SEASON_LOW_TO = 0.85
 # seasonality strength bands, on the amplitude: each band holds values below its upper bound
 SEASONALITY_BANDS = [(1.3, "no real"), (2.0, "moderate")]
 SEASONALITY_TOP_BAND = "strong"
+# platform_mix bands, on the mobile share: above the first is mobile-first, below the second desktop-first
+MOBILE_FIRST_ABOVE = 0.65
+DESKTOP_FIRST_BELOW = 0.35
+
 MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
@@ -247,6 +251,27 @@ def seasonal_consistency(years: list[dict[int, int]]) -> float | None:
     profiles = [[year[m] for m in range(1, 13)] for year in years if len(set(year.values())) > 1]
     pairs = [correlation(a, b) for i, a in enumerate(profiles) for b in profiles[i + 1 :]]
     return round(mean(pairs), 2) if pairs else None
+
+
+def platform_mix(desktop: list[int], mobile_web: list[int], mobile_app: list[int]) -> dict[str, float]:
+    """Each platform's share of the views, and the mobile total (web + app).
+
+    Raises ZeroDivisionError when no platform has views.
+    """
+    totals = {"desktop": sum(desktop), "mobile_web": sum(mobile_web), "mobile_app": sum(mobile_app)}
+    grand_total = sum(totals.values())
+    shares = {platform: round(total / grand_total, 4) for platform, total in totals.items()}
+    shares["mobile_total"] = round((totals["mobile_web"] + totals["mobile_app"]) / grand_total, 4)
+    return shares
+
+
+def platform_band(mobile_total: float) -> str:
+    """mobile-first above 0.65, desktop-first below 0.35, mixed in between."""
+    if mobile_total > MOBILE_FIRST_ABOVE:
+        return "mobile-first"
+    if mobile_total < DESKTOP_FIRST_BELOW:
+        return "desktop-first"
+    return "mixed"
 
 
 def share_of_voice(totals: dict[str, int]) -> dict[str, float]:
