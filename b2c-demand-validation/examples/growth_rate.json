@@ -1,0 +1,7 @@
+{
+  "project": "en.wikipedia",
+  "subjects": [{"label": "Meal kits", "articles": ["Meal_kit", "HelloFresh"]}],
+  "period": {"start": "2025-09-01", "end": "2026-08-31"},
+  "baseline": "year_over_year",
+  "metrics": ["growth_rate"]
+}

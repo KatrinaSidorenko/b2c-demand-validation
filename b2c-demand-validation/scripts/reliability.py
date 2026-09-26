@@ -11,8 +11,10 @@ import calendar
 from datetime import date
 from urllib.parse import unquote
 
+import metrics_calc
 from metrics_contracts import (
     CheckStatus,
+    DataKind,
     DataRequirement,
     MetricData,
     Reliability,
@@ -36,6 +38,10 @@ SPIKE_WARN_ABOVE = 0.30
 
 # data_freshness: the period ends this close to today (the API lags a day or two)
 FRESHNESS_WARN_WITHIN_DAYS = 2
+
+# signal_vs_noise: |z| of the change on weekly sums below this is noise
+SIGNAL_MIN_ABS_Z = 2.0
+SIGNAL_MIN_WEEKS = 2
 
 # aggregation: this many warns make a result "low"
 LOW_LEVEL_MIN_WARNS = 2
@@ -123,6 +129,48 @@ GENERIC_CHECKS = [data_coverage, min_volume, spike_dominance, fetch_errors, data
 
 
 # ---------------------------------------------------------------------------
+# Comparison checks (current period vs baseline)
+# ---------------------------------------------------------------------------
+
+
+def baseline_has_views(data: MetricData) -> ReliabilityCheck:
+    """Fail when the baseline has no views: a change against zero is undefined."""
+    baseline = _bundle_of_kind(data, DataKind.BASELINE_SERIES)
+    if baseline is None:
+        return ReliabilityCheck("baseline_has_views", CheckStatus.FAIL, "No baseline series resolved")
+    total = sum(baseline.series.views)
+    if total == 0:
+        detail = "The baseline has no data, so the change is undefined"
+        return ReliabilityCheck("baseline_has_views", CheckStatus.FAIL, detail)
+    return ReliabilityCheck("baseline_has_views", CheckStatus.PASS, f"baseline {total:,} views")
+
+
+def signal_vs_noise(data: MetricData) -> ReliabilityCheck:
+    """Warn when the change between the periods is within normal week-to-week noise.
+
+    Compares weekly sums (full weeks only) rather than days, to reduce the
+    day-to-day correlation of the series.
+    """
+    current = _bundle_of_kind(data, DataKind.CURRENT)
+    baseline = _bundle_of_kind(data, DataKind.BASELINE_SERIES)
+    if current is None or baseline is None:
+        return ReliabilityCheck("signal_vs_noise", CheckStatus.PASS, "Not applicable: needs both periods")
+    if sum(baseline.series.views) == 0:
+        return ReliabilityCheck("signal_vs_noise", CheckStatus.PASS, "Not tested: the baseline has no views")
+    weeks_c = metrics_calc.weekly_sums(current.series.views)
+    weeks_b = metrics_calc.weekly_sums(baseline.series.views)
+    if min(len(weeks_c), len(weeks_b)) < SIGNAL_MIN_WEEKS:
+        detail = f"Not tested: fewer than {SIGNAL_MIN_WEEKS} full weeks in a period"
+        return ReliabilityCheck("signal_vs_noise", CheckStatus.PASS, detail)
+    z = metrics_calc.mean_diff_z(weeks_c, weeks_b)
+    if abs(z) < SIGNAL_MIN_ABS_Z:
+        return ReliabilityCheck(
+            "signal_vs_noise", CheckStatus.WARN, f"z = {z:.1f} on weekly sums: change is within normal noise"
+        )
+    return ReliabilityCheck("signal_vs_noise", CheckStatus.PASS, f"z = {z:.1f} on weekly sums")
+
+
+# ---------------------------------------------------------------------------
 # Aggregation
 # ---------------------------------------------------------------------------
 
@@ -164,8 +212,16 @@ def _named_bundles(data: MetricData) -> list[tuple[str, SeriesBundle]]:
     return named
 
 
+def _bundle_of_kind(data: MetricData, kind: DataKind) -> SeriesBundle | None:
+    """The bundle of the first subject for the first requirement of this kind."""
+    for requirement, by_label in data.bundles.items():
+        if requirement.kind == kind:
+            return by_label.get(data.subjects[0].label)
+    return None
+
+
 def _requirement_name(requirement: DataRequirement) -> str:
-    name = str(requirement.kind)
+    name = requirement.kind.removesuffix("_series")
     if requirement.access != DataRequirement().access:
         name += f" {requirement.access}"
     return name

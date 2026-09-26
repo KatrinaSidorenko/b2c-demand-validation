@@ -28,7 +28,7 @@ Run `python scripts/metrics.py catalog --format short` to see the metrics that e
 | question type | metric |
 |---|---|
 | How big is the interest? | `interest_volume` |
-| Is interest growing or falling? | `growth_rate` (not available yet) |
+| Is interest growing or falling? | `growth_rate` |
 | Is interest steady or news-driven? | `volatility` (not available yet) |
 | Which option gets the most attention? | `share_of_voice` (not available yet) |
 | When in the year is interest highest? | `seasonality` (not available yet) |
@@ -49,7 +49,7 @@ Write a `spec.json` file:
 ```
 - **subjects**: give each subject a readable `label` and one or more `articles`. The views of all its articles are summed, so add synonyms and the main brands of the category. Titles must be exact Wikipedia article titles: underscores instead of spaces, and the same capitalisation (`Meal_kit`, not `meal kit`).
 - **period**: by default, the last 12 full months, ending before today. It must be at least as long as each metric's `min_period`.
-- **baseline**: `previous_period` or `year_over_year`. Only metrics that compare two periods use it. Leave it out otherwise.
+- **baseline**: `previous_period` (the same number of days right before the period) or `year_over_year` (the same dates one year earlier). Only metrics that compare two periods use it; it defaults to `previous_period`. Prefer `year_over_year` with a 12-month period: `previous_period` mixes seasonality into periods shorter than a year. Leave it out for other metrics.
 
 ### 4. Run it
 `python scripts/metrics.py run --spec spec.json > results.json`
@@ -102,3 +102,4 @@ Every result has `value`, `unit`, a code-generated `interpretation`, and `reliab
 
 ## Available metrics
 - `interest_volume`: how big is the interest in a subject? Total, average and median daily views, banded niche / moderate / significant / mass by the median. Needs a period of at least 28 days; 12 months recommended.
+- `growth_rate`: is interest growing or falling? The change in average daily views versus the baseline period, as a ratio (`0.34` = +34%), banded strong decline / decline / flat / growth / strong growth. Needs a period of at least 28 days; 12 months with `year_over_year` recommended. It includes changes in overall Wikipedia traffic. If `signal_vs_noise` warns, the change is within normal week-to-week fluctuation: don't call it growth or decline.

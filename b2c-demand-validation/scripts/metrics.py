@@ -35,6 +35,7 @@ from metrics_contracts import (
     ReliabilityCheck,
     ReliabilityLevel,
     SpecError,
+    baseline_period,
 )
 from metrics_registry import REGISTRY
 from reliability import aggregate
@@ -80,7 +81,8 @@ def catalog_short(registry: dict[str, MetricDefinition]) -> str:
     for d in registry.values():
         needs = [f">= {d.min_subjects} subjects" if d.min_subjects > 1 else "subjects"]
         needs.append(f"period (>= {d.min_period.label()})")
-        needs += [p.name for p in d.inputs if p.name not in ("subjects", "period")]
+        extra = [p for p in d.inputs if p.name not in ("subjects", "period")]
+        needs += [p.name if p.required else f"{p.name} (optional)" for p in extra]
         rows.append((d.id, d.answers, ", ".join(needs)))
     id_width = max(len(r[0]) for r in rows)
     answers_width = max(len(r[1]) for r in rows)
@@ -107,6 +109,8 @@ def parse_spec(
     period = _parse_period(raw.get("period"), errors, today or date.today())
     baseline = _parse_baseline(raw.get("baseline"), errors)
     metric_ids = _parse_metrics(raw.get("metrics"), registry, errors)
+    if baseline is None:
+        baseline = _default_baseline(metric_ids, registry)
 
     # Per-metric constraints, only once the inputs they depend on are valid.
     for metric_id in metric_ids:
@@ -126,6 +130,19 @@ def parse_spec(
                     "subjects",
                     "not_enough_subjects",
                     f"{metric_id!r} needs at least {definition.min_subjects} subjects; got {len(subjects)}.",
+                )
+            )
+
+    uses_baseline = any(r.kind == DataKind.BASELINE_SERIES for m in metric_ids for r in registry[m].data)
+    if uses_baseline and period is not None and baseline is not None:
+        compared = baseline_period(period, baseline)
+        if compared.start < PAGEVIEWS_MIN_DATE:
+            errors.append(
+                SpecError(
+                    "baseline",
+                    "baseline_before_data",
+                    f"The {baseline.value} baseline starts on {compared.start}, but pageviews data starts on "
+                    f"{PAGEVIEWS_MIN_DATE}. Move the period later so that the baseline starts on or after that date.",
                 )
             )
 
@@ -239,6 +256,15 @@ def _parse_baseline(value: Any, errors: list[SpecError]) -> Baseline | None:
         return None
 
 
+def _default_baseline(metric_ids: list[str], registry: dict[str, MetricDefinition]) -> Baseline | None:
+    """The default of the first metric that takes a baseline input, if any."""
+    for metric_id in metric_ids:
+        for param in registry[metric_id].inputs:
+            if param.name == "baseline" and param.default is not None:
+                return Baseline(param.default)
+    return None
+
+
 def _parse_metrics(value: Any, registry: dict[str, MetricDefinition], errors: list[SpecError]) -> list[str]:
     """Return the known metric ids; unknown and duplicate ids become errors."""
     if value is None:
@@ -321,6 +347,16 @@ class MetricsRunner:
                     granularity=requirement.granularity,
                 )
             )
+        if requirement.kind == DataKind.BASELINE_SERIES:
+            return self.resolver.get_subject_series(
+                SeriesRequest(
+                    project=spec.project,
+                    subject=subject,
+                    period=baseline_period(spec.period, spec.baseline or Baseline.PREVIOUS_PERIOD),
+                    access=requirement.access,
+                    granularity=requirement.granularity,
+                )
+            )
         raise NotImplementedError(f"The runner cannot resolve data kind {requirement.kind!r} yet")
 
 
@@ -366,6 +402,7 @@ def build_report(spec: AnalysisSpec, results: list[MetricResult]) -> dict[str, A
             "subjects": [s.label for s in spec.subjects],
             "period": asdict(spec.period),
             "baseline": spec.baseline,
+            "baseline_period": asdict(baseline_period(spec.period, spec.baseline)) if spec.baseline else None,
         },
         "results": [asdict(result) for result in results],
         "summary": summary,
