@@ -13,6 +13,7 @@ from urllib.parse import unquote
 
 import metrics_calc
 from metrics_contracts import (
+    PROJECT_KINDS,
     CheckStatus,
     DataKind,
     DataRequirement,
@@ -174,6 +175,43 @@ def signal_vs_noise(data: MetricData) -> ReliabilityCheck:
 
 
 # ---------------------------------------------------------------------------
+# Relative checks (subject vs the whole project)
+# ---------------------------------------------------------------------------
+
+
+def subject_min_volume(data: MetricData) -> ReliabilityCheck:
+    """min_volume on the subject series only: the project series is always large."""
+    return min_volume(_without_kinds(data, PROJECT_KINDS))
+
+
+def subject_spike_dominance(data: MetricData) -> ReliabilityCheck:
+    """spike_dominance on the subject series only."""
+    return spike_dominance(_without_kinds(data, PROJECT_KINDS))
+
+
+def relative_signal_vs_noise(data: MetricData) -> ReliabilityCheck:
+    """signal_vs_noise on the weekly ratio subject / project instead of the subject's weekly sums."""
+    bundles = {kind: _bundle_of_kind(data, kind) for kind in DataKind}
+    subject_c, project_c = bundles[DataKind.CURRENT], bundles[DataKind.PROJECT]
+    subject_b, project_b = bundles[DataKind.BASELINE_SERIES], bundles[DataKind.PROJECT_BASELINE]
+    if None in (subject_c, project_c, subject_b, project_b):
+        return ReliabilityCheck("signal_vs_noise", CheckStatus.PASS, "Not applicable: needs both periods")
+    if sum(subject_b.series.views) == 0:
+        return ReliabilityCheck("signal_vs_noise", CheckStatus.PASS, "Not tested: the baseline has no views")
+    ratio_c = metrics_calc.weekly_ratio(subject_c.series.dates, subject_c.series.views, project_c.series.views)
+    ratio_b = metrics_calc.weekly_ratio(subject_b.series.dates, subject_b.series.views, project_b.series.views)
+    if min(len(ratio_c), len(ratio_b)) < SIGNAL_MIN_WEEKS:
+        detail = f"Not tested: fewer than {SIGNAL_MIN_WEEKS} full weeks in a period"
+        return ReliabilityCheck("signal_vs_noise", CheckStatus.PASS, detail)
+    z = metrics_calc.mean_diff_z(ratio_c, ratio_b)
+    if abs(z) < SIGNAL_MIN_ABS_Z:
+        return ReliabilityCheck(
+            "signal_vs_noise", CheckStatus.WARN, f"z = {z:.1f} on weekly ratio: change is within normal noise"
+        )
+    return ReliabilityCheck("signal_vs_noise", CheckStatus.PASS, f"z = {z:.1f} on weekly ratio")
+
+
+# ---------------------------------------------------------------------------
 # Trend checks
 # ---------------------------------------------------------------------------
 
@@ -268,8 +306,14 @@ def _bundle_of_kind(data: MetricData, kind: DataKind) -> SeriesBundle | None:
     return None
 
 
+def _without_kinds(data: MetricData, kinds: frozenset[DataKind]) -> MetricData:
+    """The same data without the bundles of these kinds."""
+    bundles = {r: by_label for r, by_label in data.bundles.items() if r.kind not in kinds}
+    return MetricData(spec=data.spec, subjects=data.subjects, bundles=bundles)
+
+
 def _requirement_name(requirement: DataRequirement) -> str:
-    name = requirement.kind.removesuffix("_series")
+    name = requirement.kind.removesuffix("_series").replace("_", " ")
     if requirement.access != DataRequirement().access:
         name += f" {requirement.access}"
     return name
