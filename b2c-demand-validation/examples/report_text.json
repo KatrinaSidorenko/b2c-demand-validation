@@ -1,0 +1,27 @@
+{
+  "title": "Demand check: meal kits",
+  "problem": "Is there enough public interest in meal kits among English-speaking readers to justify building a new meal-kit subscription product?",
+  "answer": "Interest is moderate: meal kits get about 283 views a day on English Wikipedia (high reliability). That is enough to show a real audience, but not a mass-market one.",
+  "analysis": [
+    "Meal kits get about 283 views a day (110,087 over 12 months), in the moderate band (50 to 500 a day).",
+    "The level is steady: no single spike drives the total, so this is everyday interest rather than a news event."
+  ],
+  "conclusions": [
+    "There is a stable, existing audience that reads about meal kits, so the category is not dead or purely hype-driven.",
+    "Moderate interest points to a niche you would need to win share in, not an untapped mass market."
+  ],
+  "trust": [
+    "All results are high reliability: full data coverage, enough volume, no spikes, no fetch errors.",
+    "Pageviews measure attention, not purchase intent: people may read about meal kits without wanting to buy one.",
+    "Only English Wikipedia readers are covered; other languages and markets were not measured."
+  ],
+  "recommendations": [
+    "Treat the category as a viable niche: validate willingness to pay with a landing page or pre-orders before building.",
+    "Look for a sharper angle (a diet, a price point, an audience) instead of competing head-on as a general meal kit.",
+    "Re-run the analysis with competitor brands as separate subjects once share of voice is available."
+  ],
+  "not_measured": [
+    "Whether interest is growing or falling (growth_rate is not available yet).",
+    "How meal kits compare with alternatives such as grocery delivery (share_of_voice is not available yet)."
+  ]
+}
