@@ -175,6 +175,8 @@ class MetricDefinition:
     id: str
     title: str
     answers: str
+    # plain-language description for a reader who is not an analyst (shown in the PDF)
+    explainer: str
     use_when: str
     do_not_use_when: str
     interpretation_guide: dict[str, str]

@@ -68,6 +68,10 @@ INTEREST_VOLUME = MetricDefinition(
     id="interest_volume",
     title="Interest volume",
     answers="How big is the interest in the subject?",
+    explainer=(
+        "How many people read about the subject on a typical day: niche (under 50), moderate (50 to 500), "
+        "significant (500 to 5,000) or mass (over 5,000)."
+    ),
     use_when="Sizing a product area or checking that a subject has enough attention to analyse.",
     do_not_use_when=(
         "Comparing subjects across different language projects: each project has a different audience size."
@@ -133,6 +137,10 @@ GROWTH_RATE = MetricDefinition(
     id="growth_rate",
     title="Growth rate",
     answers="Is interest in the subject growing or falling?",
+    explainer=(
+        "Whether more or fewer people read about the subject than in an earlier period of the same length, "
+        "as a percentage change."
+    ),
     use_when="Deciding whether demand for a product area is expanding.",
     do_not_use_when="The subject had a one-off news event in either period; use trend and volatility first.",
     interpretation_guide={
@@ -182,6 +190,10 @@ TREND = MetricDefinition(
     id="trend",
     title="Trend",
     answers="Is the direction of interest steady over the period?",
+    explainer=(
+        "Whether interest moved steadily up or down across the period, week by week, "
+        "or had no clear direction."
+    ),
     use_when="Checking that growth or decline is sustained and not caused by a single event.",
     do_not_use_when="The period is shorter than 12 weeks.",
     interpretation_guide={
@@ -225,6 +237,10 @@ VOLATILITY = MetricDefinition(
     id="volatility",
     title="Volatility",
     answers="Is interest stable or driven by news and one-off events?",
+    explainer=(
+        "Whether interest is steady from day to day or comes in bursts caused by news and one-off events. "
+        "Bursty interest makes the other numbers less dependable."
+    ),
     use_when="Checking whether demand is steady before trusting growth or volume numbers.",
     do_not_use_when="Volume is very low: small numbers look volatile by nature.",
     interpretation_guide={

@@ -58,6 +58,7 @@ def catalog_full(registry: dict[str, MetricDefinition]) -> list[dict[str, Any]]:
             "id": d.id,
             "title": d.title,
             "answers": d.answers,
+            "explainer": d.explainer,
             "use_when": d.use_when,
             "do_not_use_when": d.do_not_use_when,
             "inputs": [{k: v for k, v in asdict(p).items() if v is not None} for p in d.inputs],
