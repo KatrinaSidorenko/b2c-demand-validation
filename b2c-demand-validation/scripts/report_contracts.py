@@ -1,5 +1,7 @@
 """Contracts for the PDF report: the text fields the model fills and their limits.
 
+Every field is written in English for a reader who is not an analyst.
+
 The numbers in the report never come from here: the report tool takes them from
 the metrics run output. These fields hold only the model's wording.
 """
@@ -38,10 +40,16 @@ class TextField:
 
 
 REPORT_FIELDS: list[TextField] = [
-    TextField("title", FieldKind.LINE, True, "Report title, e.g. 'Demand check: meal kits'."),
+    TextField("title", FieldKind.LINE, True, "Report title in English, e.g. 'Demand check: meal kits'."),
     TextField("problem", FieldKind.PARAGRAPH, True, "The user's question and the decision behind it."),
     TextField("answer", FieldKind.PARAGRAPH, True, "The short answer, with the reliability level."),
-    TextField("analysis", FieldKind.BULLETS, True, "What the results show, built on each result's interpretation."),
+    TextField(
+        "analysis",
+        FieldKind.BULLETS,
+        True,
+        "What the results show in plain words, built on each result's interpretation and the metric explainer. "
+        "Name metrics by title, not id; no jargon.",
+    ),
     TextField("conclusions", FieldKind.BULLETS, True, "What the results mean for the user's goal."),
     TextField(
         "trust",

@@ -59,6 +59,10 @@ LEVELS_NOTE = (
 
 def report_schema() -> dict[str, Any]:
     return {
+        "language": (
+            "English only, for a reader who is not an analyst. The PDF font cannot show Cyrillic, Greek or CJK "
+            "letters: translate or transliterate names."
+        ),
         "fields": [
             {
                 "name": f.name,
