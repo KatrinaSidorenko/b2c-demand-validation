@@ -121,7 +121,28 @@ def _parse_string(name: str, value: Any, max_chars: int, errors: list[SpecError]
     value = value.strip()
     if len(value) > max_chars:
         errors.append(SpecError(name, "too_long", f"{len(value)} characters; keep it to {max_chars}."))
+    if bad := _unrenderable(value):
+        errors.append(
+            SpecError(
+                name,
+                "non_latin_text",
+                f"The PDF font cannot show {bad!r}. Write the report in English; translate or transliterate names.",
+            )
+        )
     return value
+
+
+def _unrenderable(text: str) -> str | None:
+    """The first character the built-in PDF font cannot show, or None.
+
+    Helvetica covers the WinAnsi (cp1252) set only: no Cyrillic, Greek or CJK.
+    """
+    for char in text:
+        try:
+            char.encode("cp1252")
+        except UnicodeEncodeError:
+            return char
+    return None
 
 
 def _parse_bullets(
@@ -148,7 +169,17 @@ def parse_results(raw: Any) -> list[SpecError]:
         ]
     if not isinstance(raw.get("spec"), dict) or not isinstance(raw.get("results"), list) or not raw["results"]:
         return [SpecError("results", "not_a_metrics_report", "The metrics report has no spec or no results.")]
-    return []
+    # Labels are printed in the table, the setup line and the interpretations.
+    return [
+        SpecError(
+            f"results.spec.subjects[{i}]",
+            "non_latin_text",
+            f"The PDF font cannot show {bad!r} in the label {label!r}. "
+            "Relabel the subject in English in spec.json and run metrics.py again.",
+        )
+        for i, label in enumerate(raw["spec"].get("subjects") or [])
+        if isinstance(label, str) and (bad := _unrenderable(label))
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -274,7 +305,9 @@ def _reliability_summary(report: dict[str, Any]) -> list[str]:
         name = f"{r.get('subject') or 'all subjects'} / {_metric_title(r['metric'])}"
         for c in r["reliability"]["checks"]:
             if c["status"] != CheckStatus.PASS:
-                lines.append(f"{name}: {c['name']} {c['status']}: {c['detail']}")
+                # Details can name non-English article titles, which the PDF font cannot show.
+                detail = "details in results.json" if _unrenderable(c["detail"]) else c["detail"]
+                lines.append(f"{name}: {c['name']} {c['status']}: {detail}")
     summary = ", ".join(f"{n} {level}" for level, n in counts.items() if n)
     return [f"Reliability of the results: {summary}.", *lines]
 
