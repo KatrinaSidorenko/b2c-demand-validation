@@ -82,9 +82,17 @@ def create_analysis(root: Path, keywords: list[str], now: datetime) -> Path:
         except FileExistsError:
             continue
         meta = {"id": folder.name, "created": now.isoformat(timespec="seconds"), "keywords": keywords}
-        _write_json(folder / META_FILE, meta)
+        write_json(folder / META_FILE, meta)
         return folder
     raise RuntimeError(f"Could not create a unique analysis folder in {root} after {ID_ATTEMPTS} attempts.")
+
+
+def analysis_folder(root: Path, analysis_id: str) -> Path | None:
+    """The folder of an analysis, or None if the id is unknown."""
+    folder = root / analysis_id
+    if folder.parent != root or not isinstance(read_json(folder / META_FILE), dict):
+        return None
+    return folder
 
 
 def file_paths(folder: Path) -> dict[str, str]:
@@ -97,6 +105,7 @@ def describe(folder: Path, meta: dict[str, Any]) -> dict[str, Any]:
         "id": folder.name,
         "created": meta.get("created"),
         "keywords": meta.get("keywords", []),
+        "lookup_rounds": meta.get("lookup_rounds", 0),
         "project": None,
         "period": None,
         "subjects": [],
@@ -109,7 +118,7 @@ def describe(folder: Path, meta: dict[str, Any]) -> dict[str, Any]:
             max(p.stat().st_mtime for p in [folder, *folder.iterdir()])
         ).isoformat(timespec="seconds"),
     }
-    spec = _read_json(folder / FILES["spec"])
+    spec = read_json(folder / FILES["spec"])
     if isinstance(spec, dict):
         entry["project"] = spec.get("project")
         entry["period"] = spec.get("period")
@@ -118,7 +127,7 @@ def describe(folder: Path, meta: dict[str, Any]) -> dict[str, Any]:
         entry["subjects"] = [
             s.get("label") for s in spec.get("subjects") or [] if isinstance(s, dict)
         ]
-    results = _read_json(folder / FILES["results"])
+    results = read_json(folder / FILES["results"])
     if isinstance(results, dict):
         entry["results_status"] = results.get("status")
         summary = results.get("summary")
@@ -132,12 +141,12 @@ def refresh_index(root: Path) -> list[dict[str, Any]]:
     entries = []
     if root.is_dir():
         for folder in root.iterdir():
-            meta = _read_json(folder / META_FILE) if folder.is_dir() else None
+            meta = read_json(folder / META_FILE) if folder.is_dir() else None
             if isinstance(meta, dict):
                 entries.append(describe(folder, meta))
     entries.sort(key=lambda e: (e["updated"], e["id"]), reverse=True)
     if root.is_dir():
-        _write_json(root / INDEX_FILE, {"analyses": entries})
+        write_json(root / INDEX_FILE, {"analyses": entries})
     return entries
 
 
@@ -159,7 +168,7 @@ def format_short(entry: dict[str, Any]) -> str:
 # IO helpers
 # ---------------------------------------------------------------------------
 
-def _read_json(path: Path) -> Any:
+def read_json(path: Path) -> Any:
     """Parse a JSON file, or None if it is missing or unreadable.
 
     `results.json` is often written by shell redirection, so a UTF-16 file
@@ -176,7 +185,7 @@ def _read_json(path: Path) -> Any:
         return None
 
 
-def _write_json(path: Path, payload: Any) -> None:
+def write_json(path: Path, payload: Any) -> None:
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     os.replace(tmp, path)

@@ -139,7 +139,7 @@ class DataResolver:
         attempt = 0
         while True:
             data, error = call()
-            if error is None or attempt >= self.max_retries or not _is_retryable(error):
+            if error is None or attempt >= self.max_retries or not is_retryable(error):
                 return data, error
             attempt += 1
             time.sleep(self.retry_backoff_s)
@@ -150,7 +150,7 @@ class DataResolver:
 # ---------------------------------------------------------------------------
 
 
-def _is_retryable(error: ApiError) -> bool:
+def is_retryable(error: ApiError) -> bool:
     if error.type == ErrorType.NETWORK_ERROR:
         return True
     if error.type == ErrorType.HTTP_ERROR and error.status_code is not None:

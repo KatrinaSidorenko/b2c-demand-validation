@@ -23,7 +23,7 @@ From the user's message, work out:
 Only ask the user a question if you cannot tell what the subjects are. For everything else, pick a sensible default and state it in the report.
 
 ### 2. Pick the analysis folder
-Each analysis keeps its four files (spec, results, report text, PDF) in its own folder under `analyses/` in the working directory, so a new question never overwrites an earlier one. Code names the folders and keeps an index; you only decide whether to reuse one.
+Each analysis keeps its four files (spec, results, report text, PDF) in its own folder under `analyses/` in the working directory, so a new question never overwrites an earlier one. Code names the folders and keeps an index; you only decide whether to reuse one. Keep the folder's `id`: the title lookup in step 4 needs it.
 
 1. Run `python scripts/workspace.py list`. It prints one line per past analysis, most recently updated first: `id | keywords | project | period | subjects | metrics | report yes/no`.
 2. **Reuse** a folder when the request refines the same question: the same project, the same subjects and the same goal (fixing an article title, changing the period, adding a metric). Run `python scripts/workspace.py show --id <id>` and write over its files.
@@ -45,7 +45,16 @@ Run `python scripts/metrics.py catalog --format short` to see the metrics that e
 
 Only use metric ids that the catalog lists. If the question needs a metric that doesn't exist yet, run the ones that help and say in the report what could not be measured.
 
-### 4. Fill the spec
+### 4. Find the exact article titles
+Never guess article titles: look them up. A wrong title returns no data, and a redirect counts only a fraction of the views.
+
+1. `python scripts/articles.py search --id <id> --project <project> --query "<subject>" "<brand>" ...` lists the matching articles for each query, best first, with a short description. Put every query of the analysis into one call (up to 10).
+2. Pick the articles that match each subject. `python scripts/articles.py resolve --id <id> --project <project> --titles "<title>" ...` checks them (up to 20 in one call). Use each result's `title`, never the `input`:
+   - `ok`, `normalized`, `redirect`: usable. For a redirect, `title` is the target article.
+   - `disambiguation`, `missing`, `invalid`: not usable. Pick one of the `suggestions` (they are real articles, no need to resolve them again) or drop the title.
+3. Each call uses one of the analysis's **3 lookup rounds**. When a call returns `"status": "attempts_exhausted"` (exit code 2), stop looking up: keep the titles you have, drop the rest and name them as not found under **Caveats**. A `"status": "lookup_failed"` (exit code 1) did not use a round; run the same call once more.
+
+### 5. Fill the spec
 Write the spec to the `spec` path (`spec.json`):
 ```json
 {
@@ -57,17 +66,17 @@ Write the spec to the `spec` path (`spec.json`):
   "metrics": ["interest_volume"]
 }
 ```
-- **subjects**: give each subject a readable `label` and one or more `articles`. The views of all its articles are summed, so add synonyms and the main brands of the category. Titles must be exact Wikipedia article titles: underscores instead of spaces, and the same capitalisation (`Meal_kit`, not `meal kit`).
+- **subjects**: give each subject a readable `label` and one or more `articles`. The views of all its articles are summed, so add synonyms and the main brands of the category. Use only the `title` values from step 4.
 - **period**: by default, the last 12 full months, ending before today. It must be at least as long as each metric's `min_period`.
 - **baseline**: `previous_period` (the same number of days right before the period) or `year_over_year` (the same dates one year earlier). Only metrics that compare two periods use it; it defaults to `previous_period`. Prefer `year_over_year` with a 12-month period: `previous_period` mixes seasonality into periods shorter than a year. Leave it out for other metrics.
 
-### 5. Run it
+### 6. Run it
 `python scripts/metrics.py run --spec <spec> > <results>`
 - **Exit code 2, `"status": "invalid_spec"`**: nothing was fetched. Fix every listed error (`field`, `code`, `detail`) and run again.
 - **Exit code 0**: the report has one result per metric (and per subject for per-subject metrics), and a `summary` of results by reliability level.
-- If `fetch_errors` shows an article with HTTP 404, the title is wrong. Correct it, or remove it, and run again once. Don't keep guessing titles.
+- If `fetch_errors` shows an article with HTTP 404 although `resolve` returned it, the article had no views in the period (for example, it was created later). Don't look it up again; name it under **Caveats**.
 
-### 6. Report in the chat
+### 7. Report in the chat
 Keep the report short and in plain language:
 
 ```
@@ -83,7 +92,7 @@ Keep the report short and in plain language:
 **Not measured yet:** <parts of the question that need metrics that don't exist yet, if any>
 ```
 
-### 7. Build the PDF report
+### 8. Build the PDF report
 Turn the same findings into a short PDF the user can keep and share. You write only the text; the tool adds the results table, the setup line and the reliability summary from `results.json`.
 
 Run `python scripts/report.py schema` to see the fields, their limits and an example. Write the report text to the `text` path (`report.json`) in plain language:
