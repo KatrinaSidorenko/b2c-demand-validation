@@ -97,11 +97,20 @@ class PeriodLength:
         return f"{self.amount} {self.unit.value}"
 
     def is_covered_by(self, period: Period) -> bool:
+        """Months are calendar months from the start; weeks are full Monday-Sunday weeks."""
         start, end = date.fromisoformat(period.start), date.fromisoformat(period.end)
         if self.unit == PeriodUnit.MONTHS:
             return end >= _add_months(start, self.amount) - timedelta(days=1)
-        days = self.amount * (7 if self.unit == PeriodUnit.WEEKS else 1)
-        return (end - start).days + 1 >= days
+        if self.unit == PeriodUnit.WEEKS:
+            return full_weeks(period) >= self.amount
+        return (end - start).days + 1 >= self.amount
+
+    def measure(self, period: Period) -> str:
+        """The period's length in the unit this length is checked in: "90 days", "11 full weeks"."""
+        if self.unit == PeriodUnit.WEEKS:
+            return f"{full_weeks(period)} full weeks (Monday to Sunday)"
+        start, end = date.fromisoformat(period.start), date.fromisoformat(period.end)
+        return f"{(end - start).days + 1} days"
 
 
 @dataclass(frozen=True)
@@ -211,6 +220,14 @@ class SpecError:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def full_weeks(period: Period) -> int:
+    """Number of whole Monday-Sunday weeks inside the period."""
+    start, end = date.fromisoformat(period.start), date.fromisoformat(period.end)
+    first_monday = start + timedelta(days=-start.weekday() % 7)
+    last_sunday = end - timedelta(days=(end.weekday() + 1) % 7)
+    return max(0, ((last_sunday - first_monday).days + 1) // 7)
 
 
 def baseline_period(period: Period, baseline: Baseline) -> Period:
