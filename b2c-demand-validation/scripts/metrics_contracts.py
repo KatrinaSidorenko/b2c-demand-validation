@@ -53,6 +53,7 @@ class DataKind(StrEnum):
     """
 
     CURRENT = "current"  # the subject series for `spec.period`
+    BASELINE_SERIES = "baseline_series"  # the subject series for the baseline period of the spec
 
 
 class PeriodUnit(StrEnum):
@@ -210,6 +211,20 @@ class SpecError:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def baseline_period(period: Period, baseline: Baseline) -> Period:
+    """The period that `period` is compared with.
+
+    previous_period: the same number of days, ending the day before the start.
+    year_over_year: the same dates one year earlier (29 Feb maps to 28 Feb).
+    """
+    start, end = date.fromisoformat(period.start), date.fromisoformat(period.end)
+    if baseline == Baseline.YEAR_OVER_YEAR:
+        start, end = _add_months(start, -12), _add_months(end, -12)
+    else:
+        start, end = start - (end - start) - timedelta(days=1), start - timedelta(days=1)
+    return Period(start=start.isoformat(), end=end.isoformat())
 
 
 def _add_months(day: date, months: int) -> date:

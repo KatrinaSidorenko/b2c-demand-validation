@@ -6,11 +6,16 @@ numbers and returns a value. Every metric step adds its function here.
 
 from __future__ import annotations
 
-from statistics import median
+from math import inf, sqrt
+from statistics import mean, median, stdev
 
 # interest_volume size bands, on median daily views
 VOLUME_BANDS = [(50, "niche"), (500, "moderate"), (5000, "significant")]
 VOLUME_TOP_BAND = "mass"
+
+# growth_rate bands, on the ratio: each band holds values below its upper bound
+GROWTH_BANDS = [(-0.2, "strong decline"), (-0.05, "decline"), (0.05, "flat"), (0.2, "growth")]
+GROWTH_TOP_BAND = "strong growth"
 
 
 def interest_volume(views: list[int], expected_days: int) -> dict[str, float | int]:
@@ -29,3 +34,40 @@ def volume_band(median_daily_views: float) -> str:
         if median_daily_views < upper:
             return band
     return VOLUME_TOP_BAND
+
+
+def growth_rate(current: list[int], current_days: int, baseline: list[int], baseline_days: int) -> float:
+    """Average daily views of the current period over the baseline's, minus 1.
+
+    Averages, not totals, so periods of different length compare fairly.
+    Raises ZeroDivisionError when the baseline has no views.
+    """
+    avg_current = sum(current) / current_days
+    avg_baseline = sum(baseline) / baseline_days
+    return round(avg_current / avg_baseline - 1, 4)
+
+
+def growth_band(value: float) -> str:
+    """strong decline < -0.2, decline .. -0.05, flat .. +0.05, growth .. +0.2, strong growth above."""
+    for upper, band in GROWTH_BANDS:
+        if value < upper:
+            return band
+    return GROWTH_TOP_BAND
+
+
+def weekly_sums(views: list[int]) -> list[int]:
+    """Sums of consecutive 7-day blocks from the first day; a trailing partial week is dropped."""
+    return [sum(views[i : i + 7]) for i in range(0, len(views) - 6, 7)]
+
+
+def mean_diff_z(current: list[int], baseline: list[int]) -> float:
+    """z of the difference in means of two samples: (mean_c - mean_b) / sqrt(sd_c²/n_c + sd_b²/n_b).
+
+    Each sample needs at least 2 values. With no spread at all, any difference
+    is infinitely significant and no difference is 0.
+    """
+    diff = mean(current) - mean(baseline)
+    se = sqrt(stdev(current) ** 2 / len(current) + stdev(baseline) ** 2 / len(baseline))
+    if se == 0:
+        return 0.0 if diff == 0 else (inf if diff > 0 else -inf)
+    return diff / se
