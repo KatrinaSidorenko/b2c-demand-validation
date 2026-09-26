@@ -1,11 +1,14 @@
-"""Report CLI: turns a metrics run and the model's text into a short PDF.
+"""Report CLI: turns metrics runs and the model's text into a short PDF.
 
     python report.py schema
-    python report.py build --results results.json --text report.json --out report.pdf
+    python report.py build --id <analysis id> [--root analyses]
+    python report.py build --results a.json [b.json ...] --text report.json --out report.pdf
 
 The model writes only the text (`report.json`). The results table, the setup
-line and the reliability summary come from the metrics run output
-(`results.json`), so no number in the PDF is typed by the model.
+line, the cross-project comparison and the reliability summary come from the
+metrics run outputs, one per project, so no number in the PDF is typed by the
+model. With `--id`, every project part of the analysis is collected from its
+folder.
 
 Exit codes: 0 when the PDF is written, 2 on invalid input (nothing is written).
 """
@@ -40,6 +43,7 @@ from reportlab.platypus import (
 from metrics_contracts import CheckStatus, ReliabilityLevel, SpecError
 from metrics_registry import REGISTRY
 from report_contracts import MAX_BULLETS, REPORT_FIELDS, FieldKind, ReportText
+from workspace import DEFAULT_ROOT, FILES, META_FILE, analysis_folder, list_parts, read_json
 
 EXIT_OK = 0
 EXIT_INVALID_REPORT = 2
@@ -77,7 +81,8 @@ def report_schema() -> dict[str, Any]:
         "added_by_the_tool": [
             "results table (subject, metric title, interpretation, reliability)",
             "a plain-language explanation of each metric used and of the reliability levels",
-            "setup line (project, period, subjects, baseline)",
+            "setup line per project (project, period, subjects, baseline)",
+            "with several projects: a comparison table of the metrics comparable across projects",
             "reliability summary and the checks that did not pass",
             "generation date and data source note",
         ],
@@ -90,8 +95,8 @@ def report_schema() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def parse_report_text(raw: Any) -> tuple[ReportText | None, list[SpecError]]:
-    """Validate the model's text. Returns the text, or every error found."""
+def parse_report_text(raw: Any, projects: int = 1) -> tuple[ReportText | None, list[SpecError]]:
+    """Validate the model's text for a report over `projects` projects. Returns the text, or every error found."""
     if not isinstance(raw, dict):
         return None, [SpecError("text", "invalid_type", "The report text must be a JSON object.")]
 
@@ -112,6 +117,15 @@ def parse_report_text(raw: Any) -> tuple[ReportText | None, list[SpecError]]:
             values[f.name] = _parse_bullets(f.name, value, f.max_chars, f.required, errors)
         else:
             values[f.name] = _parse_string(f.name, value, f.max_chars, errors)
+    if projects > 1 and not raw.get("comparison"):
+        errors.append(
+            SpecError(
+                "comparison",
+                "missing_field",
+                f'The analysis covers {projects} projects. Add "comparison": how they differ, '
+                "using only metrics comparable across projects.",
+            )
+        )
 
     if errors:
         return None, errors
@@ -160,30 +174,55 @@ def _parse_bullets(
     return [b for i, item in enumerate(value) if (b := _parse_string(f"{name}[{i}]", item, max_chars, errors))]
 
 
-def parse_results(raw: Any) -> list[SpecError]:
+def parse_results(raw: Any, field: str = "results") -> list[SpecError]:
     """Check that the results are a successful `metrics.py run` report."""
     if not isinstance(raw, dict) or raw.get("status") != "ok":
         status = raw.get("status") if isinstance(raw, dict) else None
         return [
             SpecError(
-                "results",
+                field,
                 "not_a_metrics_report",
                 f"Expected the output of a successful `metrics.py run` (status 'ok'); got status {status!r}.",
             )
         ]
     if not isinstance(raw.get("spec"), dict) or not isinstance(raw.get("results"), list) or not raw["results"]:
-        return [SpecError("results", "not_a_metrics_report", "The metrics report has no spec or no results.")]
+        return [SpecError(field, "not_a_metrics_report", "The metrics report has no spec or no results.")]
     # Labels are printed in the table, the setup line and the interpretations.
     return [
         SpecError(
-            f"results.spec.subjects[{i}]",
+            f"{field}.spec.subjects[{i}]",
             "non_latin_text",
             f"The PDF font cannot show {bad!r} in the label {label!r}. "
-            "Relabel the subject in English in spec.json and run metrics.py again.",
+            "Relabel the subject in English in the project's spec and run metrics.py again.",
         )
         for i, label in enumerate(raw["spec"].get("subjects") or [])
         if isinstance(label, str) and (bad := _unrenderable(label))
     ]
+
+
+def check_parts(reports: list[dict[str, Any]]) -> list[SpecError]:
+    """Reports of several projects must be distinct projects over the same period and baseline."""
+    errors: list[SpecError] = []
+    first = reports[0]["spec"]
+    seen: set[str] = set()
+    for report in reports:
+        spec = report["spec"]
+        if spec["project"] in seen:
+            errors.append(
+                SpecError("results", "duplicate_project", f"{spec['project']} is given twice; pass each project once.")
+            )
+        seen.add(spec["project"])
+        for key in ("period", "baseline"):
+            if spec.get(key) != first.get(key):
+                errors.append(
+                    SpecError(
+                        f"{spec['project']}.{key}",
+                        f"{key}_mismatch",
+                        f"{spec['project']} uses {key} {spec.get(key)!r} but {first['project']} uses "
+                        f"{first.get(key)!r}. Use the same {key} in every project's spec and run them again.",
+                    )
+                )
+    return errors
 
 
 # ---------------------------------------------------------------------------
@@ -266,27 +305,93 @@ def _metric_guide(results: list[dict[str, Any]]) -> list[str]:
     return [*lines, LEVELS_NOTE]
 
 
-def _results_table(results: list[dict[str, Any]], s: dict[str, ParagraphStyle]) -> Table:
-    rows: list[list[Flowable]] = [[_p(h, s["cell_head"]) for h in ("Subject", "Metric", "Result", "Reliability")]]
-    style = [
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e6e6e6")),
-        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#bbbbbb")),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-    ]
-    for i, r in enumerate(results, start=1):
-        level = r["reliability"]["level"]
-        rows.append(
-            [
-                _p(r.get("subject") or "all subjects", s["cell"]),
-                _p(_metric_title(r["metric"]), s["cell"]),
-                _p(r["interpretation"], s["cell"]),
-                _p(level, s["cell"]),
-            ]
-        )
-        style.append(("BACKGROUND", (3, i), (3, i), LEVEL_COLORS.get(level, colors.white)))
-    table = Table(rows, colWidths=[32 * mm, 30 * mm, CONTENT_WIDTH - 84 * mm, 22 * mm], repeatRows=1)
+TABLE_STYLE = [
+    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e6e6e6")),
+    ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#bbbbbb")),
+    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+]
+
+
+def _results_table(reports: list[dict[str, Any]], s: dict[str, ParagraphStyle]) -> Table:
+    """Every result; with several projects, a Project column comes first."""
+    multi = len(reports) > 1
+    head = ("Project",) * multi + ("Subject", "Metric", "Result", "Reliability")
+    rows: list[list[Flowable]] = [[_p(h, s["cell_head"]) for h in head]]
+    style = list(TABLE_STYLE)
+    level_col = len(head) - 1
+    for report in reports:
+        for r in report["results"]:
+            level = r["reliability"]["level"]
+            rows.append(
+                [
+                    *[_p(report["spec"]["project"], s["cell"])] * multi,
+                    _p(r.get("subject") or "all subjects", s["cell"]),
+                    _p(_metric_title(r["metric"]), s["cell"]),
+                    _p(r["interpretation"], s["cell"]),
+                    _p(level, s["cell"]),
+                ]
+            )
+            i = len(rows) - 1
+            style.append(("BACKGROUND", (level_col, i), (level_col, i), LEVEL_COLORS.get(level, colors.white)))
+    if multi:
+        widths = [24 * mm, 26 * mm, 24 * mm, CONTENT_WIDTH - 94 * mm, 20 * mm]
+    else:
+        widths = [32 * mm, 30 * mm, CONTENT_WIDTH - 84 * mm, 22 * mm]
+    table = Table(rows, colWidths=widths, repeatRows=1)
     table.setStyle(TableStyle(style))
     return table
+
+
+def _comparison(reports: list[dict[str, Any]], s: dict[str, ParagraphStyle]) -> list[Flowable]:
+    """Subjects x metrics comparable across projects, one column per project, and a note on the rest."""
+    projects = [r["spec"]["project"] for r in reports]
+    by_key = {
+        (report["spec"]["project"], r.get("subject") or "all subjects", r["metric"]): r
+        for report in reports
+        for r in report["results"]
+    }
+    metric_ids = list(dict.fromkeys(r["metric"] for report in reports for r in report["results"]))
+    subjects = list(dict.fromkeys(r.get("subject") or "all subjects" for report in reports for r in report["results"]))
+    comparable = [m for m in metric_ids if (d := REGISTRY.get(m)) is not None and d.cross_project is not None]
+    within = [_metric_title(m) for m in metric_ids if m not in comparable]
+
+    flowables: list[Flowable] = []
+    if comparable:
+        rows: list[list[Flowable]] = [[_p(h, s["cell_head"]) for h in ("Subject", "Metric", *projects)]]
+        style = list(TABLE_STYLE)
+        for subject in subjects:
+            for metric_id in comparable:
+                cells = []
+                for col, project in enumerate(projects, start=2):
+                    r = by_key.get((project, subject, metric_id))
+                    if r is None:
+                        text, level = "not run", None
+                    elif r["value"] is None:
+                        text, level = "not measured", r["reliability"]["level"]
+                    else:
+                        level = r["reliability"]["level"]
+                        text = f"{REGISTRY[metric_id].cross_project(r['value'])} · {level}"
+                    cells.append(_p(text, s["cell"]))
+                    if level is not None:
+                        i = len(rows)
+                        style.append(("BACKGROUND", (col, i), (col, i), LEVEL_COLORS.get(level, colors.white)))
+                rows.append([_p(subject, s["cell"]), _p(_metric_title(metric_id), s["cell"]), *cells])
+        column = (CONTENT_WIDTH - 54 * mm) / len(projects)
+        table = Table(rows, colWidths=[28 * mm, 26 * mm, *[column] * len(projects)], repeatRows=1)
+        table.setStyle(TableStyle(style))
+        flowables.append(table)
+    else:
+        flowables.append(_p("None of the metrics used can be compared across projects.", s["meta"]))
+    if within:
+        flowables += [
+            Spacer(1, 4),
+            _p(
+                f"Not compared across projects: {', '.join(within)}. Absolute view counts depend on each "
+                "language's audience size, so compare them only within one project (see the Data table).",
+                s["meta"],
+            ),
+        ]
+    return flowables
 
 
 def _setup_line(spec: dict[str, Any]) -> str:
@@ -301,12 +406,15 @@ def _setup_line(spec: dict[str, Any]) -> str:
     return "Setup: " + "; ".join(parts) + "."
 
 
-def _reliability_summary(report: dict[str, Any]) -> list[str]:
+def _reliability_summary(reports: list[dict[str, Any]]) -> list[str]:
     counts = {level.value: 0 for level in ReliabilityLevel}
     lines = []
-    for r in report["results"]:
+    multi = len(reports) > 1
+    for report, r in ((report, r) for report in reports for r in report["results"]):
         counts[r["reliability"]["level"]] += 1
         name = f"{r.get('subject') or 'all subjects'} / {_metric_title(r['metric'])}"
+        if multi:
+            name = f"{report['spec']['project']}: {name}"
         for c in r["reliability"]["checks"]:
             if c["status"] != CheckStatus.PASS:
                 # Details can name non-English article titles, which the PDF font cannot show.
@@ -316,10 +424,11 @@ def _reliability_summary(report: dict[str, Any]) -> list[str]:
     return [f"Reliability of the results: {summary}.", *lines]
 
 
-def render_pdf(text: ReportText, report: dict[str, Any], out: Path, today: date) -> int:
-    """Write the PDF and return its page count."""
+def render_pdf(text: ReportText, reports: list[dict[str, Any]], out: Path, today: date) -> int:
+    """Write the PDF over one report per project and return its page count."""
     s = _styles()
-    spec = report["spec"]
+    results = [r for report in reports for r in report["results"]]
+    projects = ", ".join(report["spec"]["project"] for report in reports)
     pages = [0]
 
     def footer(canvas: Any, doc: Any) -> None:
@@ -333,27 +442,34 @@ def render_pdf(text: ReportText, report: dict[str, Any], out: Path, today: date)
 
     story: list[Flowable] = [
         _p(text.title, s["title"]),
-        _p(f"Generated {today.isoformat()} · Data source: Wikipedia pageviews ({spec['project']})", s["meta"]),
+        _p(f"Generated {today.isoformat()} · Data source: Wikipedia pageviews ({projects})", s["meta"]),
         Spacer(1, 6),
         *_section("Problem", [_p(text.problem, s["body"])], s),
         *_section("Answer", [_answer_box(text.answer, s)], s),
         *_section(
             "Data",
             [
-                _results_table(report["results"], s),
+                _results_table(reports, s),
                 Spacer(1, 4),
-                _p(_setup_line(spec), s["meta"]),
+                *[_p(_setup_line(report["spec"]), s["meta"]) for report in reports],
                 Spacer(1, 4),
                 _p("How to read the metrics", s["cell_head"]),
-                *[_p(line, s["meta"]) for line in _metric_guide(report["results"])],
+                *[_p(line, s["meta"]) for line in _metric_guide(results)],
             ],
             s,
         ),
+    ]
+    if len(reports) > 1:
+        comparison = _comparison(reports, s)
+        if text.comparison:
+            comparison += [Spacer(1, 4), _bullets(text.comparison, s["body"])]
+        story += _section("Comparison across projects", comparison, s)
+    story += [
         *_section("Analysis", [_bullets(text.analysis, s["body"])], s),
         *_section("Conclusions", [_bullets(text.conclusions, s["body"])], s),
         *_section(
             "Trust",
-            [_bullets(text.trust, s["body"]), Spacer(1, 4), *[_p(line, s["meta"]) for line in _reliability_summary(report)]],
+            [_bullets(text.trust, s["body"]), Spacer(1, 4), *[_p(line, s["meta"]) for line in _reliability_summary(reports)]],
             s,
         ),
         *_section("Recommendations", [_bullets(text.recommendations, s["body"])], s),
@@ -394,34 +510,76 @@ def _print_json(payload: Any) -> None:
     print(json.dumps(payload, indent=2, ensure_ascii=False))
 
 
+def _result_sources(args: argparse.Namespace) -> tuple[list[tuple[str, str]], list[SpecError]]:
+    """`(field, path)` of each project's results; with --id also fills in --text and --out."""
+    if args.results:
+        errors = [
+            SpecError(name, "missing_field", f"Give --{name} with --results, or build by --id.")
+            for name in ("text", "out")
+            if not getattr(args, name)
+        ]
+        return [(f"results[{i}]", path) for i, path in enumerate(args.results)], errors
+
+    root = Path(args.root)
+    folder = analysis_folder(root, args.id)
+    if folder is None:
+        return [], [SpecError("id", "unknown_id", f"No analysis {args.id!r} in {root}.")]
+    args.text = args.text or str(folder / FILES["text"])
+    args.out = args.out or str(folder / FILES["pdf"])
+    sources, errors = [], []
+    parts = list_parts(folder, read_json(folder / META_FILE))
+    for part in parts:
+        spec, results = part["files"]["spec"], part["files"]["results"]
+        field = f"results.{part['project'] or part['key']}"
+        if not results.is_file():
+            todo = f"run `metrics.py run --spec {spec} > {results}`" if spec.is_file() else f"write its spec to {spec}"
+            errors.append(SpecError(field, "part_not_run", f"No results for {part['project']} yet: {todo}."))
+            continue
+        sources.append((field, str(results)))
+    if not parts:
+        errors.append(SpecError("id", "no_parts", "The analysis has no projects; add one with workspace.py part."))
+    return sources, errors
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("schema", help="print the report text fields and an example")
     build = commands.add_parser("build", help="build the PDF report")
-    build.add_argument("--results", required=True, help="path to the `metrics.py run` output JSON")
-    build.add_argument("--text", required=True, help="path to the report text JSON")
-    build.add_argument("--out", required=True, help="path of the PDF to write")
+    source = build.add_mutually_exclusive_group(required=True)
+    source.add_argument("--id", help="analysis id: collect every project's results from its folder")
+    source.add_argument("--results", nargs="+", help="paths to `metrics.py run` outputs, one per project")
+    build.add_argument("--root", default=DEFAULT_ROOT, help="folder that holds all analyses (with --id)")
+    build.add_argument("--text", help="path to the report text JSON (default with --id: the analysis's)")
+    build.add_argument("--out", help="path of the PDF to write (default with --id: the analysis's)")
     args = parser.parse_args(argv)
 
     if args.command == "schema":
         _print_json(report_schema())
         return EXIT_OK
 
-    report, errors = _load_json(args.results, "results")
-    if not errors:
-        errors = parse_results(report)
-    raw_text, text_errors = _load_json(args.text, "text")
+    sources, errors = _result_sources(args)
+    reports = []
+    for field, path in sources:
+        report, load_errors = _load_json(path, field)
+        load_errors = load_errors or parse_results(report, field)
+        errors += load_errors
+        if not load_errors:
+            reports.append(report)
+    if reports and not errors:
+        errors = check_parts(reports)
     text = None
-    if not text_errors:
-        text, text_errors = parse_report_text(raw_text)
-    errors += text_errors
+    if args.text:
+        raw_text, text_errors = _load_json(args.text, "text")
+        if not text_errors:
+            text, text_errors = parse_report_text(raw_text, projects=max(len(sources), 1))
+        errors += text_errors
     if errors or text is None:
         _print_json({"status": "invalid_report", "errors": [asdict(e) for e in errors]})
         return EXIT_INVALID_REPORT
 
     out = Path(args.out)
-    pages = render_pdf(text, report, out, date.today())
+    pages = render_pdf(text, reports, out, date.today())
     _print_json({"status": "ok", "path": str(out.resolve()), "pages": pages})
     return EXIT_OK
 

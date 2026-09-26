@@ -50,6 +50,13 @@ REPORT_FIELDS: list[TextField] = [
         "What the results show in plain words, built on each result's interpretation and the metric explainer. "
         "Name metrics by title, not id; no jargon.",
     ),
+    TextField(
+        "comparison",
+        FieldKind.BULLETS,
+        False,
+        "Required when the analysis covers several projects (languages): how the projects differ, using only "
+        "metrics comparable across projects (growth, trend, volatility), never absolute view counts.",
+    ),
     TextField("conclusions", FieldKind.BULLETS, True, "What the results mean for the user's goal."),
     TextField(
         "trust",
@@ -71,4 +78,5 @@ class ReportText:
     conclusions: list[str]
     trust: list[str]
     recommendations: list[str]
+    comparison: list[str] = field(default_factory=list)
     not_measured: list[str] = field(default_factory=list)

@@ -8,9 +8,10 @@ title: it follows case fixes and redirects, and rejects missing titles and
 disambiguation pages, suggesting candidates for them. Every returned `title`
 is ready to paste into the spec.
 
-Each successful call uses one lookup round of the analysis, counted in its
-`meta.json`. After MAX_LOOKUP_ROUNDS the calls are refused, so the model stops
-guessing and reports the unresolved titles as not found.
+Each successful call uses one lookup round of the project's part of the
+analysis, counted in its `meta.json` (a project not yet in the analysis is
+added as a part). After MAX_LOOKUP_ROUNDS per project the calls are refused,
+so the model stops guessing and reports the unresolved titles as not found.
 
 Exit codes: 0 on success, 1 when the lookup failed (the round is not counted),
 2 on invalid input or when no lookup rounds are left (nothing is fetched).
@@ -20,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 import time
 from dataclasses import asdict
@@ -32,7 +32,15 @@ from mediawiki_client import MediaWikiClient
 from mediawiki_contracts import ARTICLE_NAMESPACE, SearchResult, TitleLookup
 from metrics_contracts import SpecError
 from wiki_contracts import ApiError, Result, T
-from workspace import DEFAULT_ROOT, META_FILE, analysis_folder, read_json, write_json
+from workspace import (
+    DEFAULT_ROOT,
+    META_FILE,
+    add_part,
+    analysis_folder,
+    parse_project,
+    part_key,
+    write_json,
+)
 
 EXIT_OK = 0
 EXIT_LOOKUP_FAILED = 1
@@ -45,7 +53,6 @@ MAX_LIMIT = 10
 SUGGESTIONS = 3
 MAX_RETRIES = 2
 RETRY_BACKOFF_S = 1.0
-PROJECT_PATTERN = re.compile(r"^[a-z0-9-]+\.[a-z]+$")
 
 
 class Status:
@@ -166,13 +173,6 @@ def parse_items(raw: list[str], field: str, limit: int) -> tuple[list[str], list
     return items, errors
 
 
-def parse_project(value: str) -> tuple[str, list[SpecError]]:
-    project = value.strip().lower()
-    if PROJECT_PATTERN.match(project):
-        return project, []
-    return project, [SpecError("project", "invalid_project", f'Use a project like "en.wikipedia"; got {value!r}.')]
-
-
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -217,14 +217,16 @@ def main(argv: list[str] | None = None) -> int:
         return _invalid(errors)
     assert folder is not None
 
-    meta = read_json(folder / META_FILE)
-    rounds = int(meta.get("lookup_rounds", 0))
+    meta = add_part(folder, project)
+    key = part_key(project)
+    rounds = int(meta["parts"][key].get("lookup_rounds", 0))
     if rounds >= MAX_LOOKUP_ROUNDS:
         _print_json({
             "status": "attempts_exhausted",
+            "project": project,
             "rounds_used": rounds,
             "detail": (
-                f"All {MAX_LOOKUP_ROUNDS} lookup rounds of this analysis are used. Stop looking up titles: "
+                f"All {MAX_LOOKUP_ROUNDS} lookup rounds for {project} are used. Stop looking up titles: "
                 "keep the titles that resolved, drop the others, run the analysis, and report the dropped "
                 "ones as not found on Wikipedia."
             ),
@@ -241,15 +243,17 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_LOOKUP_FAILED
 
     rounds += 1
-    write_json(folder / META_FILE, {**meta, "lookup_rounds": rounds})
+    parts = {**meta["parts"], key: {**meta["parts"][key], "lookup_rounds": rounds}}
+    write_json(folder / META_FILE, {**meta, "parts": parts})
     payload: dict[str, Any] = {
         "status": "ok",
+        "project": project,
         "rounds_used": rounds,
         "rounds_left": MAX_LOOKUP_ROUNDS - rounds,
         "results": results,
     }
     if rounds >= MAX_LOOKUP_ROUNDS:
-        payload["note"] = "This was the last lookup round: use the titles you have and drop the rest."
+        payload["note"] = "This was the last lookup round for this project: use the titles you have and drop the rest."
     _print_json(payload)
     return EXIT_OK
 

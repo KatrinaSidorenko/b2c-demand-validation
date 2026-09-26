@@ -42,6 +42,7 @@ from reliability import aggregate
 from resolver_contracts import Period, SeriesBundle, SeriesRequest, Subject
 from wiki_client import WikiPageviewsClient
 from wiki_contracts import PAGEVIEWS_MIN_DATE
+from workspace import SPEC_FILE_PATTERN, part_key
 
 EXIT_OK = 0
 EXIT_INVALID_SPEC = 2
@@ -66,6 +67,7 @@ def catalog_full(registry: dict[str, MetricDefinition]) -> list[dict[str, Any]]:
             "recommended_period": d.recommended_period,
             "min_subjects": d.min_subjects,
             "scope": d.scope,
+            "cross_project_comparable": d.cross_project is not None,
             "output": d.output,
             "interpretation_guide": d.interpretation_guide,
             "limitations": d.limitations,
@@ -75,7 +77,7 @@ def catalog_full(registry: dict[str, MetricDefinition]) -> list[dict[str, Any]]:
 
 
 def catalog_short(registry: dict[str, MetricDefinition]) -> str:
-    """One line per metric: id, the question it answers, and what it needs."""
+    """One line per metric: id, the question it answers, what it needs, and whether projects compare."""
     if not registry:
         return "No metrics registered yet."
     rows = []
@@ -84,7 +86,8 @@ def catalog_short(registry: dict[str, MetricDefinition]) -> str:
         needs.append(f"period (>= {d.min_period.label()})")
         extra = [p for p in d.inputs if p.name not in ("subjects", "period")]
         needs += [p.name if p.required else f"{p.name} (optional)" for p in extra]
-        rows.append((d.id, d.answers, ", ".join(needs)))
+        across = "comparable across projects" if d.cross_project else "within one project only"
+        rows.append((d.id, d.answers, f"{', '.join(needs)} — {across}"))
     id_width = max(len(r[0]) for r in rows)
     answers_width = max(len(r[1]) for r in rows)
     return "\n".join(f"{i:<{id_width}} — {a:<{answers_width}} — needs: {n}" for i, a, n in rows)
@@ -420,6 +423,22 @@ def _load_spec(path: str) -> tuple[Any, list[SpecError]]:
         return None, [SpecError("spec", "invalid_json", f"The spec is not valid JSON: {exc}.")]
 
 
+def check_part(path: str, raw: Any) -> list[SpecError]:
+    """A spec at a part's path (`spec.<key>.json`) must be for that part's project."""
+    match = SPEC_FILE_PATTERN.match(Path(path).name)
+    project = raw.get("project") if isinstance(raw, dict) else None
+    if match is None or not isinstance(project, str) or part_key(project.strip()) == match["key"]:
+        return []
+    return [
+        SpecError(
+            "project",
+            "project_mismatch",
+            f"This file is the spec of the {'.'.join(match['key'].rsplit('-', 1))} part, but its project is "
+            f"{project!r}. Write each project's spec to its own path from workspace.py show.",
+        )
+    ]
+
+
 def _print_json(payload: Any) -> None:
     print(json.dumps(payload, indent=2, ensure_ascii=False))
 
@@ -442,6 +461,8 @@ def main(argv: list[str] | None = None) -> int:
 
     raw, errors = _load_spec(args.spec)
     spec = None
+    if not errors:
+        errors = check_part(args.spec, raw)
     if not errors:
         spec, errors = parse_spec(raw, REGISTRY)
     if errors or spec is None:
