@@ -105,6 +105,7 @@ def describe(folder: Path, meta: dict[str, Any]) -> dict[str, Any]:
         "id": folder.name,
         "created": meta.get("created"),
         "keywords": meta.get("keywords", []),
+        "lookup_rounds": meta.get("lookup_rounds", 0),
         "project": None,
         "period": None,
         "subjects": [],
