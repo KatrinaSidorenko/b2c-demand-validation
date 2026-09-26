@@ -67,7 +67,7 @@ Write the spec to the `spec` path (`spec.json`):
 }
 ```
 - **subjects**: give each subject a readable `label` and one or more `articles`. The views of all its articles are summed, so add synonyms and the main brands of the category. Use only the `title` values from step 4.
-- **label**: always in English, whatever the project, e.g. `"Kvass"` for the ru.wikipedia article `Квас`. The PDF prints labels, and its font has no Cyrillic, Greek or CJK letters. Article titles stay in the project's language.
+- **label**: always in English, whatever the project, e.g. `"Kvass"` for the uk.wikipedia article `Квас`. The PDF prints labels, and its font has no Cyrillic, Greek or CJK letters. Article titles stay in the project's language.
 - **period**: by default, the last 12 full months, ending before today. It must be at least as long as each metric's `min_period`.
 - **baseline**: `previous_period` (the same number of days right before the period) or `year_over_year` (the same dates one year earlier). Only metrics that compare two periods use it; it defaults to `previous_period`. Prefer `year_over_year` with a 12-month period: `previous_period` mixes seasonality into periods shorter than a year. Leave it out for other metrics.
 
