@@ -5,7 +5,7 @@ description: Measure public interest in products, topics, brands or ideas to val
 
 # B2C demand validation
 
-Code computes, you decide. You turn the user's question into an analysis spec: the goal, the subjects, the metrics and the period. The scripts fetch the data, do all the arithmetic and grade how reliable each number is. Never compute metric values yourself and never build API requests.
+Code computes, you decide. You turn the user's question into an analysis spec: the goal, the subjects, the metrics and the period. The scripts fetch the data, do all the arithmetic, grade how reliable each number is and lay out the PDF report. Never compute metric values yourself, never build API requests and never write code to make the report.
 
 The only data source today is Wikipedia pageviews: how often people read the articles about a subject. It is a proxy for attention, not for sales or purchase intent. Say so when it matters for the user's decision.
 
@@ -52,7 +52,7 @@ Write a `spec.json` file:
 - **baseline**: `previous_period` or `year_over_year`. Only metrics that compare two periods use it. Leave it out otherwise.
 
 ### 4. Run it
-`python scripts/metrics.py run --spec spec.json`
+`python scripts/metrics.py run --spec spec.json > results.json`
 - **Exit code 2, `"status": "invalid_spec"`**: nothing was fetched. Fix every listed error (`field`, `code`, `detail`) and run again.
 - **Exit code 0**: the report has one result per metric (and per subject for per-subject metrics), and a `summary` of results by reliability level.
 - If `fetch_errors` shows an article with HTTP 404, the title is wrong. Correct it, or remove it, and run again once. Don't keep guessing titles.
@@ -72,6 +72,24 @@ Keep the report short and in plain language:
 **Setup:** <project, period, articles per subject, and the defaults you chose>
 **Not measured yet:** <parts of the question that need metrics that don't exist yet, if any>
 ```
+
+### 6. Build the PDF report
+Turn the same findings into a short PDF the user can keep and share. You write only the text; the tool adds the results table, the setup line and the reliability summary from `results.json`.
+
+Run `python scripts/report.py schema` to see the fields, their limits and an example. Write a `report.json` in plain language:
+- **title**, **problem**: the user's question and the decision behind it.
+- **answer**: the same answer as in the chat, with the reliability level.
+- **analysis**: what the results show, built on each result's `interpretation`.
+- **conclusions**: what that means for the user's goal.
+- **trust**: reliability levels, the checks behind a `medium`, `low` or `invalid` level, and the data being a proxy.
+- **recommendations**: next steps, each tied to the goal.
+- **not_measured** (optional): parts of the question no available metric covers.
+
+Follow the reliability rules below, and don't write numbers that `results.json` doesn't contain.
+
+Run `python scripts/report.py build --results results.json --text report.json --out report.pdf`.
+- **Exit code 2, `"status": "invalid_report"`**: nothing was written. Fix every listed error and run again.
+- **Exit code 0**: give the user the PDF `path`.
 
 ## Reliability rules
 Every result has `value`, `unit`, a code-generated `interpretation`, and `reliability` with a `level` (`high`, `medium`, `low`, `invalid`), `usable_for_claims`, and the `checks` behind it.
