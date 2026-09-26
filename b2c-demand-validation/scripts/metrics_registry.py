@@ -155,6 +155,49 @@ GROWTH_RATE = MetricDefinition(
 
 
 # ---------------------------------------------------------------------------
+# volatility
+# ---------------------------------------------------------------------------
+
+
+def _volatility_compute(data: MetricData) -> dict[str, float | list[str] | None]:
+    series = data.bundle(CURRENT).series
+    return metrics_calc.volatility(series.dates, series.views)
+
+
+def _volatility_interpret(value: dict, data: MetricData, reliability: Reliability) -> str:
+    sentence = f"Interest is {metrics_calc.volatility_band(value['cv'])} (CV = {value['cv']:.2f})."
+    if value["spike_dates"]:
+        sentence += f" Strong spikes on {', '.join(value['spike_dates'])}."
+    return sentence
+
+
+VOLATILITY = MetricDefinition(
+    id="volatility",
+    title="Volatility",
+    answers="Is interest stable or driven by news and one-off events?",
+    use_when="Checking whether demand is steady before trusting growth or volume numbers.",
+    do_not_use_when="Volume is very low: small numbers look volatile by nature.",
+    interpretation_guide={
+        "cv": "< 0.3 stable, 0.3 .. 0.7 moderate, > 0.7 volatile",
+        "spike_ratio": "> 5 means at least one strong spike",
+    },
+    limitations="Weekly seasonality (weekday vs weekend) adds some volatility to every subject.",
+    inputs=[SUBJECTS_INPUT, PERIOD_INPUT],
+    min_period=PeriodLength(28, PeriodUnit.DAYS),
+    recommended_period="6-12 months",
+    min_subjects=1,
+    scope=MetricScope.PER_SUBJECT,
+    unit="ratio",
+    output={"value": {"cv": "float", "spike_ratio": "float", "spike_dates": "list[str]"}, "unit": "ratio"},
+    data=[CURRENT],
+    compute=_volatility_compute,
+    # No spike_dominance: spikes are what this metric measures.
+    checks=[check for check in GENERIC_CHECKS if check is not spike_dominance],
+    interpret=_volatility_interpret,
+)
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -166,4 +209,4 @@ def _verb(label: str, singular: str) -> str:
     return singular[:-1] if plural else singular
 
 
-REGISTRY: dict[str, MetricDefinition] = {d.id: d for d in [INTEREST_VOLUME, GROWTH_RATE]}
+REGISTRY: dict[str, MetricDefinition] = {d.id: d for d in [INTEREST_VOLUME, GROWTH_RATE, VOLATILITY]}

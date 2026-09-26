@@ -29,7 +29,7 @@ Run `python scripts/metrics.py catalog --format short` to see the metrics that e
 |---|---|
 | How big is the interest? | `interest_volume` |
 | Is interest growing or falling? | `growth_rate` |
-| Is interest steady or news-driven? | `volatility` (not available yet) |
+| Is interest steady or news-driven? | `volatility` |
 | Which option gets the most attention? | `share_of_voice` (not available yet) |
 | When in the year is interest highest? | `seasonality` (not available yet) |
 
@@ -103,3 +103,4 @@ Every result has `value`, `unit`, a code-generated `interpretation`, and `reliab
 ## Available metrics
 - `interest_volume`: how big is the interest in a subject? Total, average and median daily views, banded niche / moderate / significant / mass by the median. Needs a period of at least 28 days; 12 months recommended.
 - `growth_rate`: is interest growing or falling? The change in average daily views versus the baseline period, as a ratio (`0.34` = +34%), banded strong decline / decline / flat / growth / strong growth. Needs a period of at least 28 days; 12 months with `year_over_year` recommended. It includes changes in overall Wikipedia traffic. If `signal_vs_noise` warns, the change is within normal week-to-week fluctuation: don't call it growth or decline.
+- `volatility`: is interest stable, or driven by news and one-off events? The coefficient of variation of daily views (stable below 0.3, moderately volatile 0.3 .. 0.7, volatile above), the max / median ratio (above 5 means at least one strong spike), and up to 5 spike days (above median + 5 × MAD). Needs at least 28 days; 6-12 months recommended. Use it before trusting `growth_rate` or `interest_volume`: a volatile subject's numbers are driven by events. Low-volume subjects look volatile by nature.
