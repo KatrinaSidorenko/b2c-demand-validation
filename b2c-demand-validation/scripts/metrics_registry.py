@@ -25,7 +25,9 @@ from reliability import (
     data_coverage,
     data_freshness,
     fetch_errors,
+    min_volume,
     relative_signal_vs_noise,
+    seasonal_consistency,
     share_min_volume,
     signal_vs_noise,
     spike_dominance,
@@ -34,6 +36,7 @@ from reliability import (
     subjects_have_views,
     trend_signal_vs_noise,
 )
+from wiki_contracts import Granularity
 
 CURRENT = DataRequirement()
 BASELINE = DataRequirement(kind=DataKind.BASELINE_SERIES)
@@ -427,6 +430,79 @@ RELATIVE_INTEREST = MetricDefinition(
 
 
 # ---------------------------------------------------------------------------
+# seasonality
+# ---------------------------------------------------------------------------
+
+MONTHLY = DataRequirement(granularity=Granularity.MONTHLY)
+
+
+def _seasonality_compute(data: MetricData) -> dict:
+    series = data.bundle(MONTHLY).series
+    return metrics_calc.seasonality(series.dates, series.views)
+
+
+def _seasonality_interpret(value: dict, data: MetricData, reliability: Reliability) -> str:
+    amplitude = value["amplitude"]
+    size = f"amplitude {amplitude:.1f}×" if amplitude is not None else "some months have no views"
+    band = metrics_calc.seasonality_band(amplitude)
+    peaks, lows = ", ".join(value["peak_months"]), ", ".join(value["low_months"])
+    if band == "no real" or not (peaks or lows):
+        return f"Interest is about the same all year ({size})."
+    parts = ([f"peaks in {peaks}"] if peaks else []) + ([f"is lowest in {lows}"] if lows else [])
+    return f"Interest {' and '.join(parts)} ({band} seasonality, {size})."
+
+
+def _seasonality_cross_project(value: dict) -> str:
+    band, peaks = metrics_calc.seasonality_band(value["amplitude"]), value["peak_months"]
+    if band == "no real" or not peaks:
+        return f"{band} seasonality"
+    return f"{band}, peaks in {', '.join(peaks)}"
+
+
+SEASONALITY = MetricDefinition(
+    id="seasonality",
+    title="Seasonality",
+    answers="In which months is interest highest and lowest?",
+    explainer=(
+        "Which months of the year people read about the subject most and least, averaged over several years, "
+        "to time launches and campaigns."
+    ),
+    use_when="Planning launch or campaign timing.",
+    do_not_use_when="The period is shorter than 24 full months.",
+    interpretation_guide={
+        "index": "1.0 = an average month; peak months >= 1.15, low months <= 0.85",
+        "amplitude": "< 1.3 no real seasonality, 1.3 .. 2 moderate, > 2 strong",
+    },
+    limitations=(
+        "A long-term trend distorts the profile; each year is normalised by its own mean to reduce this. "
+        "Years are counted back from the last full month, so months that don't fill a whole year at the start "
+        "are dropped."
+    ),
+    inputs=[SUBJECTS_INPUT, PERIOD_INPUT],
+    min_period=PeriodLength(24, PeriodUnit.MONTHS),
+    recommended_period="36 full months",
+    min_subjects=1,
+    scope=MetricScope.PER_SUBJECT,
+    unit="index",
+    output={
+        "value": {
+            "index": "12 floats, Jan..Dec, 1.0 = average",
+            "peak_months": "list[str]",
+            "low_months": "list[str]",
+            "amplitude": "max/min",
+        },
+        "unit": "index",
+    },
+    data=[MONTHLY],
+    compute=_seasonality_compute,
+    # No spike_dominance (not applicable to monthly series) and no data_freshness: only full months are used.
+    checks=[data_coverage, min_volume, fetch_errors, seasonal_consistency],
+    interpret=_seasonality_interpret,
+    cross_project=_seasonality_cross_project,
+)
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -439,5 +515,14 @@ def _verb(label: str, singular: str) -> str:
 
 
 REGISTRY: dict[str, MetricDefinition] = {
-    d.id: d for d in [INTEREST_VOLUME, GROWTH_RATE, TREND, VOLATILITY, SHARE_OF_VOICE, RELATIVE_INTEREST]
+    d.id: d
+    for d in [
+        INTEREST_VOLUME,
+        GROWTH_RATE,
+        TREND,
+        VOLATILITY,
+        SHARE_OF_VOICE,
+        RELATIVE_INTEREST,
+        SEASONALITY,
+    ]
 }

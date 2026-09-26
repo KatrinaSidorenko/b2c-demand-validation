@@ -47,6 +47,10 @@ SIGNAL_MIN_WEEKS = 2
 # trend_signal_vs_noise: R² of the weekly trend line below this is no clear trend
 TREND_MIN_R2 = 0.3
 
+# seasonal_consistency: mean correlation between the monthly profiles of the years
+SEASONAL_CONSISTENCY_WARN_BELOW = 0.5
+SEASONAL_CONSISTENCY_FAIL_BELOW = 0.0
+
 # aggregation: this many warns make a result "low"
 LOW_LEVEL_MIN_WARNS = 2
 
@@ -233,6 +237,29 @@ def trend_signal_vs_noise(data: MetricData) -> ReliabilityCheck:
             "signal_vs_noise", CheckStatus.WARN, f"R² = {r2:.2f} (< {TREND_MIN_R2}): no clear trend"
         )
     return ReliabilityCheck("signal_vs_noise", CheckStatus.PASS, f"R² = {r2:.2f} on weekly sums")
+
+
+# ---------------------------------------------------------------------------
+# Seasonality checks
+# ---------------------------------------------------------------------------
+
+
+def seasonal_consistency(data: MetricData) -> ReliabilityCheck:
+    """Warn when the monthly pattern changes from year to year, fail when years contradict each other."""
+    current = _bundle_of_kind(data, DataKind.CURRENT)
+    if current is None:
+        return ReliabilityCheck("seasonal_consistency", CheckStatus.PASS, "Not applicable: no current series")
+    years = metrics_calc.seasonal_years(current.series.dates, current.series.views)
+    r = metrics_calc.seasonal_consistency(years)
+    if r is None:
+        detail = "Not tested: fewer than 2 years with varying monthly views"
+        return ReliabilityCheck("seasonal_consistency", CheckStatus.PASS, detail)
+    detail = f"mean correlation between {len(years)} years = {r:.2f}"
+    if r < SEASONAL_CONSISTENCY_FAIL_BELOW:
+        return ReliabilityCheck("seasonal_consistency", CheckStatus.FAIL, f"{detail}: the years contradict each other")
+    if r < SEASONAL_CONSISTENCY_WARN_BELOW:
+        return ReliabilityCheck("seasonal_consistency", CheckStatus.WARN, f"{detail}: the pattern changes year to year")
+    return ReliabilityCheck("seasonal_consistency", CheckStatus.PASS, detail)
 
 
 # ---------------------------------------------------------------------------
