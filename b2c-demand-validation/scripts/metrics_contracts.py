@@ -101,20 +101,24 @@ class PeriodLength:
         return f"{self.amount}{self.unit.value[0]}"
 
     def label(self) -> str:
-        """Readable form: "28 days", "12 weeks", "24 months"."""
+        """Readable form: "28 days", "12 weeks", "24 full months"."""
+        if self.unit == PeriodUnit.MONTHS:
+            return f"{self.amount} full months"
         return f"{self.amount} {self.unit.value}"
 
     def is_covered_by(self, period: Period) -> bool:
-        """Months are calendar months from the start; weeks are full Monday-Sunday weeks."""
+        """Months are full calendar months; weeks are full Monday-Sunday weeks."""
         start, end = date.fromisoformat(period.start), date.fromisoformat(period.end)
         if self.unit == PeriodUnit.MONTHS:
-            return end >= _add_months(start, self.amount) - timedelta(days=1)
+            return full_months(period) >= self.amount
         if self.unit == PeriodUnit.WEEKS:
             return full_weeks(period) >= self.amount
         return (end - start).days + 1 >= self.amount
 
     def measure(self, period: Period) -> str:
         """The period's length in the unit this length is checked in: "90 days", "11 full weeks"."""
+        if self.unit == PeriodUnit.MONTHS:
+            return f"{full_months(period)} full calendar months"
         if self.unit == PeriodUnit.WEEKS:
             return f"{full_weeks(period)} full weeks (Monday to Sunday)"
         start, end = date.fromisoformat(period.start), date.fromisoformat(period.end)
@@ -242,6 +246,25 @@ def full_weeks(period: Period) -> int:
     first_monday = start + timedelta(days=-start.weekday() % 7)
     last_sunday = end - timedelta(days=(end.weekday() + 1) % 7)
     return max(0, ((last_sunday - first_monday).days + 1) // 7)
+
+
+def full_month_period(period: Period) -> Period | None:
+    """The period trimmed to whole calendar months, or None when it holds none."""
+    start, end = date.fromisoformat(period.start), date.fromisoformat(period.end)
+    if start.day != 1:
+        start = _add_months(start.replace(day=1), 1)
+    if end.day != calendar.monthrange(end.year, end.month)[1]:
+        end = end.replace(day=1) - timedelta(days=1)
+    return Period(start=start.isoformat(), end=end.isoformat()) if start <= end else None
+
+
+def full_months(period: Period) -> int:
+    """Number of whole calendar months inside the period."""
+    trimmed = full_month_period(period)
+    if trimmed is None:
+        return 0
+    start, end = date.fromisoformat(trimmed.start), date.fromisoformat(trimmed.end)
+    return (end.year - start.year) * 12 + end.month - start.month + 1
 
 
 def baseline_period(period: Period, baseline: Baseline) -> Period:

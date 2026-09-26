@@ -38,12 +38,13 @@ from metrics_contracts import (
     ReliabilityLevel,
     SpecError,
     baseline_period,
+    full_month_period,
 )
 from metrics_registry import REGISTRY
 from reliability import aggregate
 from resolver_contracts import Period, SeriesBundle, SeriesRequest, Subject
 from wiki_client import WikiPageviewsClient
-from wiki_contracts import PAGEVIEWS_MIN_DATE
+from wiki_contracts import PAGEVIEWS_MIN_DATE, Granularity
 from workspace import SPEC_FILE_PATTERN, part_key
 
 EXIT_OK = 0
@@ -364,11 +365,15 @@ class MetricsRunner:
     def _fetch(self, spec: AnalysisSpec, requirement: DataRequirement, subject: Subject) -> SeriesBundle:
         # Metric steps add a branch here for each new DataKind they introduce.
         if requirement.kind == DataKind.CURRENT:
+            period = spec.period
+            if requirement.granularity == Granularity.MONTHLY:
+                # A partial month would skew a monthly profile; validation guarantees full months remain.
+                period = full_month_period(spec.period) or spec.period
             return self.resolver.get_subject_series(
                 SeriesRequest(
                     project=spec.project,
                     subject=subject,
-                    period=spec.period,
+                    period=period,
                     access=requirement.access,
                     granularity=requirement.granularity,
                 )
