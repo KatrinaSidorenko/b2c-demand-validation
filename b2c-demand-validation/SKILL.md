@@ -15,14 +15,23 @@ Follow these steps in order. Paths are relative to this skill's folder.
 ### 1. Understand the request
 From the user's message, work out:
 - **Goal**: the decision behind the question, e.g. "is this niche big enough to build for?", "which of these options should we focus on?".
-- **Question type**: what the user needs measured. See the table in step 2.
+- **Question type**: what the user needs measured. See the table in step 3.
 - **Subjects**: the things to measure: products, categories, brands, options. Each one becomes a subject.
 - **Audience**: which language the target customers read. This picks the project: `en.wikipedia` for English, `de.wikipedia` for German, and so on.
 - **Time frame**: a period the user named, or none.
 
 Only ask the user a question if you cannot tell what the subjects are. For everything else, pick a sensible default and state it in the report.
 
-### 2. Pick the metrics
+### 2. Pick the analysis folder
+Each analysis keeps its four files (spec, results, report text, PDF) in its own folder under `analyses/` in the working directory, so a new question never overwrites an earlier one. Code names the folders and keeps an index; you only decide whether to reuse one.
+
+1. Run `python scripts/workspace.py list`. It prints one line per past analysis, most recently updated first: `id | keywords | project | period | subjects | metrics | report yes/no`.
+2. **Reuse** a folder when the request refines the same question: the same project, the same subjects and the same goal (fixing an article title, changing the period, adding a metric). Run `python scripts/workspace.py show --id <id>` and write over its files.
+3. **Create a new folder** for anything else: new subjects, another project (language), or a different decision. Run `python scripts/workspace.py new --keywords "<keyword>" ...` with 1 to 5 short keywords (at most 30 characters each) that name the topic, e.g. `--keywords "meal kits" "hellofresh" "market size"`. If you are unsure, create a new folder: it costs nothing and never overwrites anything.
+
+Both `new` and `show` print `files` with the absolute paths of `spec`, `results`, `text` and `pdf`. Use these exact paths in the steps below, wherever they mention `spec.json`, `results.json`, `report.json` or `report.pdf`.
+
+### 3. Pick the metrics
 Run `python scripts/metrics.py catalog --format short` to see the metrics that exist now. Run `python scripts/metrics.py catalog` for the full entries: when to use each metric, when not to, and how to read its value.
 
 | question type | metric |
@@ -36,8 +45,8 @@ Run `python scripts/metrics.py catalog --format short` to see the metrics that e
 
 Only use metric ids that the catalog lists. If the question needs a metric that doesn't exist yet, run the ones that help and say in the report what could not be measured.
 
-### 3. Fill the spec
-Write a `spec.json` file:
+### 4. Fill the spec
+Write the spec to the `spec` path (`spec.json`):
 ```json
 {
   "project": "en.wikipedia",
@@ -52,13 +61,13 @@ Write a `spec.json` file:
 - **period**: by default, the last 12 full months, ending before today. It must be at least as long as each metric's `min_period`.
 - **baseline**: `previous_period` (the same number of days right before the period) or `year_over_year` (the same dates one year earlier). Only metrics that compare two periods use it; it defaults to `previous_period`. Prefer `year_over_year` with a 12-month period: `previous_period` mixes seasonality into periods shorter than a year. Leave it out for other metrics.
 
-### 4. Run it
-`python scripts/metrics.py run --spec spec.json > results.json`
+### 5. Run it
+`python scripts/metrics.py run --spec <spec> > <results>`
 - **Exit code 2, `"status": "invalid_spec"`**: nothing was fetched. Fix every listed error (`field`, `code`, `detail`) and run again.
 - **Exit code 0**: the report has one result per metric (and per subject for per-subject metrics), and a `summary` of results by reliability level.
 - If `fetch_errors` shows an article with HTTP 404, the title is wrong. Correct it, or remove it, and run again once. Don't keep guessing titles.
 
-### 5. Report in the chat
+### 6. Report in the chat
 Keep the report short and in plain language:
 
 ```
@@ -74,10 +83,10 @@ Keep the report short and in plain language:
 **Not measured yet:** <parts of the question that need metrics that don't exist yet, if any>
 ```
 
-### 6. Build the PDF report
+### 7. Build the PDF report
 Turn the same findings into a short PDF the user can keep and share. You write only the text; the tool adds the results table, the setup line and the reliability summary from `results.json`.
 
-Run `python scripts/report.py schema` to see the fields, their limits and an example. Write a `report.json` in plain language:
+Run `python scripts/report.py schema` to see the fields, their limits and an example. Write the report text to the `text` path (`report.json`) in plain language:
 - **title**, **problem**: the user's question and the decision behind it.
 - **answer**: the same answer as in the chat, with the reliability level.
 - **analysis**: what the results show, built on each result's `interpretation`.
@@ -88,7 +97,7 @@ Run `python scripts/report.py schema` to see the fields, their limits and an exa
 
 Follow the reliability rules below, and don't write numbers that `results.json` doesn't contain.
 
-Run `python scripts/report.py build --results results.json --text report.json --out report.pdf`.
+Run `python scripts/report.py build --results <results> --text <text> --out <pdf>`.
 - **Exit code 2, `"status": "invalid_report"`**: nothing was written. Fix every listed error and run again.
 - **Exit code 0**: give the user the PDF `path`.
 
