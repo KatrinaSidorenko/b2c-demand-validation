@@ -26,6 +26,9 @@ from reliability import (
     data_freshness,
     fetch_errors,
     min_volume,
+    platform_coverage,
+    platform_fetch_errors,
+    platform_min_volume,
     relative_signal_vs_noise,
     seasonal_consistency,
     share_min_volume,
@@ -36,7 +39,7 @@ from reliability import (
     subjects_have_views,
     trend_signal_vs_noise,
 )
-from wiki_contracts import Granularity
+from wiki_contracts import Access, Granularity
 
 CURRENT = DataRequirement()
 BASELINE = DataRequirement(kind=DataKind.BASELINE_SERIES)
@@ -503,6 +506,71 @@ SEASONALITY = MetricDefinition(
 
 
 # ---------------------------------------------------------------------------
+# platform_mix
+# ---------------------------------------------------------------------------
+
+DESKTOP = DataRequirement(access=Access.DESKTOP)
+MOBILE_WEB = DataRequirement(access=Access.MOBILE_WEB)
+MOBILE_APP = DataRequirement(access=Access.MOBILE_APP)
+
+
+def _platform_mix_compute(data: MetricData) -> dict[str, float]:
+    return metrics_calc.platform_mix(
+        data.bundle(DESKTOP).series.views,
+        data.bundle(MOBILE_WEB).series.views,
+        data.bundle(MOBILE_APP).series.views,
+    )
+
+
+def _platform_mix_interpret(value: dict[str, float], data: MetricData, reliability: Reliability) -> str:
+    return (
+        f"The audience is {metrics_calc.platform_band(value['mobile_total'])}: {value['mobile_total']:.0%} mobile "
+        f"({value['mobile_web']:.0%} web, {value['mobile_app']:.0%} app), {value['desktop']:.0%} desktop."
+    )
+
+
+def _platform_mix_cross_project(value: dict[str, float]) -> str:
+    return f"{metrics_calc.platform_band(value['mobile_total'])}, {value['mobile_total']:.0%} mobile"
+
+
+PLATFORM_MIX = MetricDefinition(
+    id="platform_mix",
+    title="Platform mix",
+    answers="Is the audience mostly on mobile or on desktop?",
+    explainer=(
+        "Whether the people reading about the subject mostly use phones or computers, "
+        "a hint at which product surface to build first."
+    ),
+    use_when="Choosing which product surface to prioritise.",
+    do_not_use_when="Volume is very low.",
+    interpretation_guide={
+        "mobile_total": f"> {metrics_calc.MOBILE_FIRST_ABOVE} mobile-first, "
+        f"{metrics_calc.DESKTOP_FIRST_BELOW} .. {metrics_calc.MOBILE_FIRST_ABOVE} mixed, "
+        f"< {metrics_calc.DESKTOP_FIRST_BELOW} desktop-first",
+    },
+    limitations=(
+        "Reflects how people read Wikipedia, not how they would use the product. Wikipedia overall is mostly "
+        "mobile, so compare with other subjects or the project mix."
+    ),
+    inputs=[SUBJECTS_INPUT, PERIOD_INPUT],
+    min_period=PeriodLength(28, PeriodUnit.DAYS),
+    recommended_period="3-12 months",
+    min_subjects=1,
+    scope=MetricScope.PER_SUBJECT,
+    unit="share",
+    output={
+        "value": {"desktop": "share", "mobile_web": "share", "mobile_app": "share", "mobile_total": "share"},
+        "unit": "share",
+    },
+    data=[DESKTOP, MOBILE_WEB, MOBILE_APP],
+    compute=_platform_mix_compute,
+    checks=[platform_coverage, platform_min_volume, platform_fetch_errors, data_freshness],
+    interpret=_platform_mix_interpret,
+    cross_project=_platform_mix_cross_project,
+)
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -524,5 +592,6 @@ REGISTRY: dict[str, MetricDefinition] = {
         SHARE_OF_VOICE,
         RELATIVE_INTEREST,
         SEASONALITY,
+        PLATFORM_MIX,
     ]
 }
