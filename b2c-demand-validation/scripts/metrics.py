@@ -23,6 +23,8 @@ from typing import Any
 
 from data_resolver import DataResolver
 from metrics_contracts import (
+    BASELINE_KINDS,
+    PROJECT_KINDS,
     AnalysisSpec,
     Baseline,
     CheckStatus,
@@ -140,7 +142,7 @@ def parse_spec(
     if subjects is not None and any(registry[m].scope == MetricScope.CROSS_SUBJECT for m in metric_ids):
         errors += _shared_articles(subjects)
 
-    uses_baseline = any(r.kind == DataKind.BASELINE_SERIES for m in metric_ids for r in registry[m].data)
+    uses_baseline = any(r.kind in BASELINE_KINDS for m in metric_ids for r in registry[m].data)
     if uses_baseline and period is not None and baseline is not None:
         compared = baseline_period(period, baseline)
         if compared.start < PAGEVIEWS_MIN_DATE:
@@ -353,7 +355,8 @@ class MetricsRunner:
         return results
 
     def _resolve(self, spec: AnalysisSpec, requirement: DataRequirement, subject: Subject) -> SeriesBundle:
-        key = (requirement, subject.label)
+        # A project series is the same for every subject: fetch it once.
+        key = (requirement, spec.project if requirement.kind in PROJECT_KINDS else subject.label)
         if key not in self._fetched:
             self._fetched[key] = self._fetch(spec, requirement, subject)
         return self._fetched[key]
@@ -379,6 +382,13 @@ class MetricsRunner:
                     access=requirement.access,
                     granularity=requirement.granularity,
                 )
+            )
+        if requirement.kind in PROJECT_KINDS:
+            period = spec.period
+            if requirement.kind == DataKind.PROJECT_BASELINE:
+                period = baseline_period(spec.period, spec.baseline or Baseline.PREVIOUS_PERIOD)
+            return self.resolver.get_project_series(
+                spec.project, period, access=requirement.access, granularity=requirement.granularity
             )
         raise NotImplementedError(f"The runner cannot resolve data kind {requirement.kind!r} yet")
 
