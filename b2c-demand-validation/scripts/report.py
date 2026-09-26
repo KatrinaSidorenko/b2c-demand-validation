@@ -38,6 +38,7 @@ from reportlab.platypus import (
 )
 
 from metrics_contracts import CheckStatus, ReliabilityLevel, SpecError
+from metrics_registry import REGISTRY
 from report_contracts import MAX_BULLETS, REPORT_FIELDS, FieldKind, ReportText
 
 EXIT_OK = 0
@@ -45,6 +46,10 @@ EXIT_INVALID_REPORT = 2
 
 EXAMPLE_PATH = Path(__file__).resolve().parent.parent / "examples" / "report_text.json"
 PROXY_NOTE = "Wikipedia pageviews are a proxy for attention, not for sales or purchase intent."
+LEVELS_NOTE = (
+    "Reliability: high and medium results can be relied on; low is a weak signal; "
+    "invalid means the metric could not be measured."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -54,6 +59,10 @@ PROXY_NOTE = "Wikipedia pageviews are a proxy for attention, not for sales or pu
 
 def report_schema() -> dict[str, Any]:
     return {
+        "language": (
+            "English only, for a reader who is not an analyst. The PDF font cannot show Cyrillic, Greek or CJK "
+            "letters: translate or transliterate names."
+        ),
         "fields": [
             {
                 "name": f.name,
@@ -66,7 +75,8 @@ def report_schema() -> dict[str, Any]:
             for f in REPORT_FIELDS
         ],
         "added_by_the_tool": [
-            "results table (subject, metric, interpretation, reliability)",
+            "results table (subject, metric title, interpretation, reliability)",
+            "a plain-language explanation of each metric used and of the reliability levels",
             "setup line (project, period, subjects, baseline)",
             "reliability summary and the checks that did not pass",
             "generation date and data source note",
@@ -115,7 +125,28 @@ def _parse_string(name: str, value: Any, max_chars: int, errors: list[SpecError]
     value = value.strip()
     if len(value) > max_chars:
         errors.append(SpecError(name, "too_long", f"{len(value)} characters; keep it to {max_chars}."))
+    if bad := _unrenderable(value):
+        errors.append(
+            SpecError(
+                name,
+                "non_latin_text",
+                f"The PDF font cannot show {bad!r}. Write the report in English; translate or transliterate names.",
+            )
+        )
     return value
+
+
+def _unrenderable(text: str) -> str | None:
+    """The first character the built-in PDF font cannot show, or None.
+
+    Helvetica covers the WinAnsi (cp1252) set only: no Cyrillic, Greek or CJK.
+    """
+    for char in text:
+        try:
+            char.encode("cp1252")
+        except UnicodeEncodeError:
+            return char
+    return None
 
 
 def _parse_bullets(
@@ -142,7 +173,17 @@ def parse_results(raw: Any) -> list[SpecError]:
         ]
     if not isinstance(raw.get("spec"), dict) or not isinstance(raw.get("results"), list) or not raw["results"]:
         return [SpecError("results", "not_a_metrics_report", "The metrics report has no spec or no results.")]
-    return []
+    # Labels are printed in the table, the setup line and the interpretations.
+    return [
+        SpecError(
+            f"results.spec.subjects[{i}]",
+            "non_latin_text",
+            f"The PDF font cannot show {bad!r} in the label {label!r}. "
+            "Relabel the subject in English in spec.json and run metrics.py again.",
+        )
+        for i, label in enumerate(raw["spec"].get("subjects") or [])
+        if isinstance(label, str) and (bad := _unrenderable(label))
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +251,21 @@ def _answer_box(answer: str, s: dict[str, ParagraphStyle]) -> Table:
     return box
 
 
+def _metric_title(metric_id: str) -> str:
+    definition = REGISTRY.get(metric_id)
+    return definition.title if definition else metric_id
+
+
+def _metric_guide(results: list[dict[str, Any]]) -> list[str]:
+    """One plain-language line per metric in the results, then the reliability levels."""
+    lines = []
+    for metric_id in dict.fromkeys(r["metric"] for r in results):
+        definition = REGISTRY.get(metric_id)
+        if definition:
+            lines.append(f"{definition.title}: {definition.explainer}")
+    return [*lines, LEVELS_NOTE]
+
+
 def _results_table(results: list[dict[str, Any]], s: dict[str, ParagraphStyle]) -> Table:
     rows: list[list[Flowable]] = [[_p(h, s["cell_head"]) for h in ("Subject", "Metric", "Result", "Reliability")]]
     style = [
@@ -222,7 +278,7 @@ def _results_table(results: list[dict[str, Any]], s: dict[str, ParagraphStyle]) 
         rows.append(
             [
                 _p(r.get("subject") or "all subjects", s["cell"]),
-                _p(r["metric"], s["cell"]),
+                _p(_metric_title(r["metric"]), s["cell"]),
                 _p(r["interpretation"], s["cell"]),
                 _p(level, s["cell"]),
             ]
@@ -250,10 +306,12 @@ def _reliability_summary(report: dict[str, Any]) -> list[str]:
     lines = []
     for r in report["results"]:
         counts[r["reliability"]["level"]] += 1
-        name = f"{r.get('subject') or 'all subjects'} / {r['metric']}"
+        name = f"{r.get('subject') or 'all subjects'} / {_metric_title(r['metric'])}"
         for c in r["reliability"]["checks"]:
             if c["status"] != CheckStatus.PASS:
-                lines.append(f"{name}: {c['name']} {c['status']}: {c['detail']}")
+                # Details can name non-English article titles, which the PDF font cannot show.
+                detail = "details in results.json" if _unrenderable(c["detail"]) else c["detail"]
+                lines.append(f"{name}: {c['name']} {c['status']}: {detail}")
     summary = ", ".join(f"{n} {level}" for level, n in counts.items() if n)
     return [f"Reliability of the results: {summary}.", *lines]
 
@@ -279,7 +337,18 @@ def render_pdf(text: ReportText, report: dict[str, Any], out: Path, today: date)
         Spacer(1, 6),
         *_section("Problem", [_p(text.problem, s["body"])], s),
         *_section("Answer", [_answer_box(text.answer, s)], s),
-        *_section("Data", [_results_table(report["results"], s), Spacer(1, 4), _p(_setup_line(spec), s["meta"])], s),
+        *_section(
+            "Data",
+            [
+                _results_table(report["results"], s),
+                Spacer(1, 4),
+                _p(_setup_line(spec), s["meta"]),
+                Spacer(1, 4),
+                _p("How to read the metrics", s["cell_head"]),
+                *[_p(line, s["meta"]) for line in _metric_guide(report["results"])],
+            ],
+            s,
+        ),
         *_section("Analysis", [_bullets(text.analysis, s["body"])], s),
         *_section("Conclusions", [_bullets(text.conclusions, s["body"])], s),
         *_section(

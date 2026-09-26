@@ -67,6 +67,7 @@ Write the spec to the `spec` path (`spec.json`):
 }
 ```
 - **subjects**: give each subject a readable `label` and one or more `articles`. The views of all its articles are summed, so add synonyms and the main brands of the category. Use only the `title` values from step 4.
+- **label**: always in English, whatever the project, e.g. `"Kvass"` for the ru.wikipedia article `Квас`. The PDF prints labels, and its font has no Cyrillic, Greek or CJK letters. Article titles stay in the project's language.
 - **period**: by default, the last 12 full months, ending before today. It must be at least as long as each metric's `min_period`.
 - **baseline**: `previous_period` (the same number of days right before the period) or `year_over_year` (the same dates one year earlier). Only metrics that compare two periods use it; it defaults to `previous_period`. Prefer `year_over_year` with a 12-month period: `previous_period` mixes seasonality into periods shorter than a year. Leave it out for other metrics.
 
@@ -93,9 +94,15 @@ Keep the report short and in plain language:
 ```
 
 ### 8. Build the PDF report
-Turn the same findings into a short PDF the user can keep and share. You write only the text; the tool adds the results table, the setup line and the reliability summary from `results.json`.
+Turn the same findings into a short PDF the user can keep and share. You write only the text; the tool adds the results table, the setup line, a plain-language explanation of each metric used and the reliability summary from `results.json`.
 
-Run `python scripts/report.py schema` to see the fields, their limits and an example. Write the report text to the `text` path (`report.json`) in plain language:
+Write the PDF for a business reader who is not an analyst:
+- **English only**, whatever language the user or the project uses. Translate or transliterate non-English names (`Квас` → Kvass). The PDF font cannot show Cyrillic, Greek or CJK letters.
+- Name metrics by their title (Interest volume, Growth rate), never by their id.
+- Say in plain words what each number means for the decision. Build on the metric's `explainer` (from `python scripts/metrics.py catalog`) and the result's `interpretation`.
+- Leave out jargon such as R², CV, MAD or z-scores; say "consistent", "steady", "bursty" instead.
+
+Run `python scripts/report.py schema` to see the fields, their limits and an example. Write the report text to the `text` path (`report.json`):
 - **title**, **problem**: the user's question and the decision behind it.
 - **answer**: the same answer as in the chat, with the reliability level.
 - **analysis**: what the results show, built on each result's `interpretation`.
@@ -107,7 +114,7 @@ Run `python scripts/report.py schema` to see the fields, their limits and an exa
 Follow the reliability rules below, and don't write numbers that `results.json` doesn't contain.
 
 Run `python scripts/report.py build --results <results> --text <text> --out <pdf>`.
-- **Exit code 2, `"status": "invalid_report"`**: nothing was written. Fix every listed error and run again.
+- **Exit code 2, `"status": "invalid_report"`**: nothing was written. Fix every listed error and run again. `non_latin_text` on a text field: rewrite it in English. On `results.spec.subjects[i]`: relabel the subject in English in `spec.json` and run step 6 again.
 - **Exit code 0**: give the user the PDF `path`.
 
 ## Reliability rules
