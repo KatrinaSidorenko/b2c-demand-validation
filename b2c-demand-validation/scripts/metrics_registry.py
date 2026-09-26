@@ -22,8 +22,13 @@ from metrics_contracts import (
 from reliability import (
     GENERIC_CHECKS,
     baseline_has_views,
+    data_coverage,
+    data_freshness,
+    fetch_errors,
+    share_min_volume,
     signal_vs_noise,
     spike_dominance,
+    subjects_have_views,
     trend_signal_vs_noise,
 )
 
@@ -285,6 +290,64 @@ VOLATILITY = MetricDefinition(
 
 
 # ---------------------------------------------------------------------------
+# share_of_voice
+# ---------------------------------------------------------------------------
+
+
+def _share_of_voice_compute(data: MetricData) -> dict[str, float]:
+    return metrics_calc.share_of_voice({s.label: sum(data.bundle(CURRENT, s).series.views) for s in data.subjects})
+
+
+def _share_of_voice_interpret(value: dict[str, float], data: MetricData, reliability: Reliability) -> str:
+    (leader, top), (second, runner_up), *rest = value.items()
+    others = ", ".join(f"{label} ({share:.0%})" for label, share in rest)
+    if metrics_calc.is_share_tie(top, runner_up):
+        sentence = f"{leader} and {second} get about the same attention ({top:.0%} vs {runner_up:.0%})"
+        return f"{sentence}, ahead of {others}." if others else f"{sentence}."
+    ahead = f"{second} ({runner_up:.0%})" + (f", {others}" if others else "")
+    return f"{leader} {_verb(leader, 'gets')} {top:.0%} of the attention, ahead of {ahead}."
+
+
+def _share_of_voice_cross_project(value: dict[str, float]) -> str:
+    return ", ".join(f"{label} {share:.0%}" for label, share in value.items())
+
+
+SHARE_OF_VOICE = MetricDefinition(
+    id="share_of_voice",
+    title="Share of voice",
+    answers="Which of the compared options gets the most attention?",
+    explainer=(
+        "How the attention is split between the compared options: each option's share of all the reading "
+        "about them, adding up to 100%."
+    ),
+    use_when="Choosing between product directions or comparing against competitors.",
+    do_not_use_when="Subjects come from different language projects, or there is only one subject.",
+    interpretation_guide={
+        "leader": "share > 0.5 with 2 subjects, or clearly above the others",
+        "tie": f"top two shares within {metrics_calc.SHARE_TIE_WITHIN}",
+    },
+    limitations=(
+        "Shares depend on which articles are chosen for each subject; a broad article (e.g. 'Food') "
+        "dominates narrow ones."
+    ),
+    inputs=[InputParam(name="subjects", type="list[Subject]", min_items=2), PERIOD_INPUT],
+    min_period=PeriodLength(28, PeriodUnit.DAYS),
+    recommended_period="3-12 months",
+    min_subjects=2,
+    scope=MetricScope.CROSS_SUBJECT,
+    unit="share",
+    output={"value": {"<subject label>": "share [0, 1]"}, "unit": "share"},
+    data=[CURRENT],
+    compute=_share_of_voice_compute,
+    # Every share depends on every subject, so a failing subject invalidates the whole result;
+    # a low-volume subject only warns.
+    checks=[data_coverage, share_min_volume, spike_dominance, fetch_errors, data_freshness, subjects_have_views],
+    interpret=_share_of_voice_interpret,
+    cross_project=_share_of_voice_cross_project,
+)
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -296,4 +359,6 @@ def _verb(label: str, singular: str) -> str:
     return singular[:-1] if plural else singular
 
 
-REGISTRY: dict[str, MetricDefinition] = {d.id: d for d in [INTEREST_VOLUME, GROWTH_RATE, TREND, VOLATILITY]}
+REGISTRY: dict[str, MetricDefinition] = {
+    d.id: d for d in [INTEREST_VOLUME, GROWTH_RATE, TREND, VOLATILITY, SHARE_OF_VOICE]
+}

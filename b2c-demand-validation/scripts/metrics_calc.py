@@ -32,6 +32,9 @@ SPIKE_MAX_DATES = 5
 GROWTH_BANDS = [(-0.2, "strong decline"), (-0.05, "decline"), (0.05, "flat"), (0.2, "growth")]
 GROWTH_TOP_BAND = "strong growth"
 
+# share_of_voice: the top two shares are a tie when they are this close
+SHARE_TIE_WITHIN = 0.05
+
 
 def interest_volume(views: list[int], expected_days: int) -> dict[str, float | int]:
     """Total, average and median daily views of a daily series."""
@@ -159,3 +162,18 @@ def volatility_band(cv: float) -> str:
         if cv < upper:
             return band
     return VOLATILITY_TOP_BAND
+
+
+def share_of_voice(totals: dict[str, int]) -> dict[str, float]:
+    """Each subject's share of the summed views, highest first.
+
+    Raises ZeroDivisionError when no subject has views.
+    """
+    grand_total = sum(totals.values())
+    shares = {label: round(total / grand_total, 4) for label, total in totals.items()}
+    return dict(sorted(shares.items(), key=lambda item: item[1], reverse=True))
+
+
+def is_share_tie(first: float, second: float) -> bool:
+    """The top two shares are within 5 percentage points."""
+    return round(first - second, 4) <= SHARE_TIE_WITHIN

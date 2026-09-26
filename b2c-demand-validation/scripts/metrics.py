@@ -137,6 +137,9 @@ def parse_spec(
                 )
             )
 
+    if subjects is not None and any(registry[m].scope == MetricScope.CROSS_SUBJECT for m in metric_ids):
+        errors += _shared_articles(subjects)
+
     uses_baseline = any(r.kind == DataKind.BASELINE_SERIES for m in metric_ids for r in registry[m].data)
     if uses_baseline and period is not None and baseline is not None:
         compared = baseline_period(period, baseline)
@@ -206,6 +209,26 @@ def _parse_subjects(value: Any, errors: list[SpecError]) -> list[Subject] | None
             continue
         subjects.append(Subject(label=label, articles=[a.strip() for a in articles]))
     return subjects if len(errors) == count else None
+
+
+def _shared_articles(subjects: list[Subject]) -> list[SpecError]:
+    """Cross-subject metrics compare subjects, so an article in two subjects would be counted twice."""
+    errors: list[SpecError] = []
+    owner: dict[str, str] = {}
+    for i, subject in enumerate(subjects):
+        for article in subject.articles:
+            key = article.replace(" ", "_")
+            if key in owner and owner[key] != subject.label:
+                errors.append(
+                    SpecError(
+                        f"subjects[{i}].articles",
+                        "shared_article",
+                        f"{article!r} is in both {owner[key]!r} and {subject.label!r}; its views would be "
+                        "counted twice. Keep it in one subject.",
+                    )
+                )
+            owner.setdefault(key, subject.label)
+    return errors
 
 
 def _parse_period(value: Any, errors: list[SpecError], today: date) -> Period | None:
