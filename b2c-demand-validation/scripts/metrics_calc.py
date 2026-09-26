@@ -164,6 +164,34 @@ def volatility_band(cv: float) -> str:
     return VOLATILITY_TOP_BAND
 
 
+def relative_interest(
+    subject_current: list[int],
+    project_current: list[int],
+    subject_baseline: list[int],
+    project_baseline: list[int],
+) -> dict[str, float]:
+    """Change of the subject's share of all project views, and of the project's own daily views.
+
+    relative_change = share_current / share_baseline - 1, with share = subject total / project total.
+    project_change compares average daily views, so periods of different length compare fairly.
+    Raises ZeroDivisionError when the baseline subject or either project series has no views.
+    """
+    share_current = sum(subject_current) / sum(project_current)
+    share_baseline = sum(subject_baseline) / sum(project_baseline)
+    avg_current = sum(project_current) / len(project_current)
+    avg_baseline = sum(project_baseline) / len(project_baseline)
+    return {
+        "relative_change": round(share_current / share_baseline - 1, 4),
+        "project_change": round(avg_current / avg_baseline - 1, 4),
+    }
+
+
+def weekly_ratio(dates: list[str], views: list[int], denominator: list[int]) -> list[float]:
+    """Monday-Sunday sums of `views` over those of `denominator`, for full weeks where the denominator has views."""
+    weeks = zip(resample_weekly(dates, views), resample_weekly(dates, denominator))
+    return [part / whole for part, whole in weeks if whole]
+
+
 def share_of_voice(totals: dict[str, int]) -> dict[str, float]:
     """Each subject's share of the summed views, highest first.
 

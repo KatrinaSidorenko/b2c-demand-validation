@@ -25,9 +25,12 @@ from reliability import (
     data_coverage,
     data_freshness,
     fetch_errors,
+    relative_signal_vs_noise,
     share_min_volume,
     signal_vs_noise,
     spike_dominance,
+    subject_min_volume,
+    subject_spike_dominance,
     subjects_have_views,
     trend_signal_vs_noise,
 )
@@ -348,6 +351,82 @@ SHARE_OF_VOICE = MetricDefinition(
 
 
 # ---------------------------------------------------------------------------
+# relative_interest
+# ---------------------------------------------------------------------------
+
+PROJECT = DataRequirement(kind=DataKind.PROJECT)
+PROJECT_BASELINE = DataRequirement(kind=DataKind.PROJECT_BASELINE)
+
+
+def _relative_interest_compute(data: MetricData) -> dict[str, float]:
+    return metrics_calc.relative_interest(
+        data.bundle(CURRENT).series.views,
+        data.bundle(PROJECT).series.views,
+        data.bundle(BASELINE).series.views,
+        data.bundle(PROJECT_BASELINE).series.views,
+    )
+
+
+def _relative_interest_interpret(value: dict[str, float], data: MetricData, reliability: Reliability) -> str:
+    change = value["relative_change"]
+    band = metrics_calc.growth_band(change)
+    prefix = f"Relative to all {data.spec.project} traffic, interest"
+    if round(abs(change), 2) == 0:
+        sentence = f"{prefix} held steady ({band})."
+    else:
+        sentence = f"{prefix} {'grew' if change > 0 else 'fell'} {abs(change):.0%} ({band})."
+    sentence += f" Overall traffic changed {value['project_change']:+.0%}."
+    noisy = any(c.name == signal_vs_noise.__name__ and c.status == CheckStatus.WARN for c in reliability.checks)
+    if noisy:
+        sentence += " The change is within normal fluctuation."
+    return sentence
+
+
+def _relative_interest_cross_project(value: dict[str, float]) -> str:
+    change = value["relative_change"]
+    return f"{change:+.0%} ({metrics_calc.growth_band(change)})"
+
+
+RELATIVE_INTEREST = MetricDefinition(
+    id="relative_interest",
+    title="Relative interest",
+    answers="Is the change in interest real, or caused by overall Wikipedia traffic changes?",
+    explainer=(
+        "Whether the subject gained or lost ground compared with everything else people read on the site, "
+        "so a site-wide rise or drop in traffic doesn't look like a change in interest."
+    ),
+    use_when="Confirming a growth_rate result, especially over year_over_year.",
+    do_not_use_when="The period is shorter than 28 days.",
+    interpretation_guide={
+        "relative_change": "same bands as growth_rate: < -0.2 strong decline, -0.2 .. -0.05 decline, "
+        "-0.05 .. +0.05 flat, +0.05 .. +0.2 growth, > +0.2 strong growth",
+        "project_change": "the change in the project's own daily views; explains the gap to growth_rate",
+    },
+    limitations="The denominator is the whole project, which is dominated by unrelated topics.",
+    inputs=[SUBJECTS_INPUT, PERIOD_INPUT, BASELINE_INPUT],
+    min_period=PeriodLength(28, PeriodUnit.DAYS),
+    recommended_period="12 months with year_over_year",
+    min_subjects=1,
+    scope=MetricScope.PER_SUBJECT,
+    unit="ratio",
+    output={"value": {"relative_change": "ratio", "project_change": "ratio"}, "unit": "ratio"},
+    data=[CURRENT, BASELINE, PROJECT, PROJECT_BASELINE],
+    compute=_relative_interest_compute,
+    checks=[
+        data_coverage,
+        subject_min_volume,
+        subject_spike_dominance,
+        fetch_errors,
+        data_freshness,
+        baseline_has_views,
+        relative_signal_vs_noise,
+    ],
+    interpret=_relative_interest_interpret,
+    cross_project=_relative_interest_cross_project,
+)
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -360,5 +439,5 @@ def _verb(label: str, singular: str) -> str:
 
 
 REGISTRY: dict[str, MetricDefinition] = {
-    d.id: d for d in [INTEREST_VOLUME, GROWTH_RATE, TREND, VOLATILITY, SHARE_OF_VOICE]
+    d.id: d for d in [INTEREST_VOLUME, GROWTH_RATE, TREND, VOLATILITY, SHARE_OF_VOICE, RELATIVE_INTEREST]
 }

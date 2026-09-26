@@ -54,6 +54,14 @@ class DataKind(StrEnum):
 
     CURRENT = "current"  # the subject series for `spec.period`
     BASELINE_SERIES = "baseline_series"  # the subject series for the baseline period of the spec
+    PROJECT = "project"  # total views of the spec's project for `spec.period`
+    PROJECT_BASELINE = "project_baseline"  # total views of the project for the baseline period
+
+
+# Kinds compared against the baseline period: a spec using them needs a baseline.
+BASELINE_KINDS = frozenset({DataKind.BASELINE_SERIES, DataKind.PROJECT_BASELINE})
+# Kinds that are the same series for every subject of the spec.
+PROJECT_KINDS = frozenset({DataKind.PROJECT, DataKind.PROJECT_BASELINE})
 
 
 class PeriodUnit(StrEnum):
