@@ -43,6 +43,9 @@ FRESHNESS_WARN_WITHIN_DAYS = 2
 SIGNAL_MIN_ABS_Z = 2.0
 SIGNAL_MIN_WEEKS = 2
 
+# trend_signal_vs_noise: R² of the weekly trend line below this is no clear trend
+TREND_MIN_R2 = 0.3
+
 # aggregation: this many warns make a result "low"
 LOW_LEVEL_MIN_WARNS = 2
 
@@ -157,8 +160,8 @@ def signal_vs_noise(data: MetricData) -> ReliabilityCheck:
         return ReliabilityCheck("signal_vs_noise", CheckStatus.PASS, "Not applicable: needs both periods")
     if sum(baseline.series.views) == 0:
         return ReliabilityCheck("signal_vs_noise", CheckStatus.PASS, "Not tested: the baseline has no views")
-    weeks_c = metrics_calc.weekly_sums(current.series.views)
-    weeks_b = metrics_calc.weekly_sums(baseline.series.views)
+    weeks_c = metrics_calc.resample_weekly(current.series.dates, current.series.views)
+    weeks_b = metrics_calc.resample_weekly(baseline.series.dates, baseline.series.views)
     if min(len(weeks_c), len(weeks_b)) < SIGNAL_MIN_WEEKS:
         detail = f"Not tested: fewer than {SIGNAL_MIN_WEEKS} full weeks in a period"
         return ReliabilityCheck("signal_vs_noise", CheckStatus.PASS, detail)
@@ -168,6 +171,30 @@ def signal_vs_noise(data: MetricData) -> ReliabilityCheck:
             "signal_vs_noise", CheckStatus.WARN, f"z = {z:.1f} on weekly sums: change is within normal noise"
         )
     return ReliabilityCheck("signal_vs_noise", CheckStatus.PASS, f"z = {z:.1f} on weekly sums")
+
+
+# ---------------------------------------------------------------------------
+# Trend checks
+# ---------------------------------------------------------------------------
+
+
+def trend_signal_vs_noise(data: MetricData) -> ReliabilityCheck:
+    """Warn when a straight line explains little of the weekly series: no clear trend."""
+    current = _bundle_of_kind(data, DataKind.CURRENT)
+    if current is None:
+        return ReliabilityCheck("signal_vs_noise", CheckStatus.PASS, "Not applicable: no current series")
+    weekly = metrics_calc.resample_weekly(current.series.dates, current.series.views)
+    if len(weekly) < 2:
+        return ReliabilityCheck("signal_vs_noise", CheckStatus.PASS, "Not tested: fewer than 2 full weeks")
+    if sum(weekly) == 0:
+        return ReliabilityCheck("signal_vs_noise", CheckStatus.PASS, "Not tested: no views")
+    # Rounded like the metric value, so the check and the interpretation agree.
+    r2 = round(metrics_calc.linear_fit(weekly)[1], 2)
+    if r2 < TREND_MIN_R2:
+        return ReliabilityCheck(
+            "signal_vs_noise", CheckStatus.WARN, f"R² = {r2:.2f} (< {TREND_MIN_R2}): no clear trend"
+        )
+    return ReliabilityCheck("signal_vs_noise", CheckStatus.PASS, f"R² = {r2:.2f} on weekly sums")
 
 
 # ---------------------------------------------------------------------------

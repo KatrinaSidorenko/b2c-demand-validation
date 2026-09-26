@@ -121,7 +121,7 @@ def parse_spec(
                     "period",
                     "period_too_short",
                     f"{metric_id!r} needs at least {definition.min_period.label()}; "
-                    f"the period has {_period_days(period)} days.",
+                    f"the period has {definition.min_period.measure(period)}.",
                 )
             )
         if subjects is not None and len(subjects) < definition.min_subjects:
@@ -293,10 +293,6 @@ def _unknown_metric_detail(metric_id: Any, registry: dict[str, MetricDefinition]
         return f"{detail} Did you mean {close[0]!r}?"
     available = ", ".join(repr(m) for m in registry) or "none yet"
     return f"{detail} Available metrics: {available}."
-
-
-def _period_days(period: Period) -> int:
-    return (date.fromisoformat(period.end) - date.fromisoformat(period.start)).days + 1
 
 
 # ---------------------------------------------------------------------------
