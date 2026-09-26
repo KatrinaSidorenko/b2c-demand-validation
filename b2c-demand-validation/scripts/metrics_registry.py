@@ -133,6 +133,10 @@ def _growth_rate_interpret(value: float, data: MetricData, reliability: Reliabil
     return sentence
 
 
+def _growth_rate_cross_project(value: float) -> str:
+    return f"{value:+.0%} ({metrics_calc.growth_band(value)})"
+
+
 GROWTH_RATE = MetricDefinition(
     id="growth_rate",
     title="Growth rate",
@@ -165,6 +169,7 @@ GROWTH_RATE = MetricDefinition(
     compute=_growth_rate_compute,
     checks=[*GENERIC_CHECKS, baseline_has_views, signal_vs_noise],
     interpret=_growth_rate_interpret,
+    cross_project=_growth_rate_cross_project,
 )
 
 
@@ -183,6 +188,14 @@ def _trend_interpret(value: dict[str, float], data: MetricData, reliability: Rel
     return (
         f"Interest is {metrics_calc.trend_direction(slope)} at about {slope:+.1f}% a month; "
         f"the trend is {metrics_calc.trend_consistency(r2)} (R² = {r2:.2f})."
+    )
+
+
+def _trend_cross_project(value: dict[str, float]) -> str:
+    slope = value["slope_pct_per_month"]
+    return (
+        f"{metrics_calc.trend_direction(slope)}, {slope:+.1f}% a month "
+        f"({metrics_calc.trend_consistency(value['r2'])})"
     )
 
 
@@ -213,6 +226,7 @@ TREND = MetricDefinition(
     # spike_dominance stays in: a spike near either end of the period tilts the line.
     checks=[*GENERIC_CHECKS, trend_signal_vs_noise],
     interpret=_trend_interpret,
+    cross_project=_trend_cross_project,
 )
 
 
@@ -231,6 +245,12 @@ def _volatility_interpret(value: dict, data: MetricData, reliability: Reliabilit
     if value["spike_dates"]:
         sentence += f" Strong spikes on {', '.join(value['spike_dates'])}."
     return sentence
+
+
+def _volatility_cross_project(value: dict) -> str:
+    band = metrics_calc.volatility_band(value["cv"]) if value["cv"] is not None else "no views"
+    spikes = len(value["spike_dates"])
+    return f"{band}, {spikes} strong spike{'s' if spikes != 1 else ''}"
 
 
 VOLATILITY = MetricDefinition(
@@ -260,6 +280,7 @@ VOLATILITY = MetricDefinition(
     # No spike_dominance: spikes are what this metric measures.
     checks=[check for check in GENERIC_CHECKS if check is not spike_dominance],
     interpret=_volatility_interpret,
+    cross_project=_volatility_cross_project,
 )
 
 

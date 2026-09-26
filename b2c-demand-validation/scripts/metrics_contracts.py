@@ -195,6 +195,9 @@ class MetricDefinition:
     checks: list[Check]
     # value, data, reliability -> interpretation sentence
     interpret: Callable[[Any, MetricData, Reliability], str]
+    # value -> a short, jargon-free cell for the cross-project comparison in the PDF.
+    # None when values from different projects can't be compared (e.g. absolute views).
+    cross_project: Callable[[Any], str] | None = None
 
 
 # ---------------------------------------------------------------------------
