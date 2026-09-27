@@ -198,6 +198,27 @@ def trend_signal_vs_noise(data: MetricData) -> ReliabilityCheck:
 
 
 # ---------------------------------------------------------------------------
+# Share checks (cross-subject)
+# ---------------------------------------------------------------------------
+
+
+def share_min_volume(data: MetricData) -> ReliabilityCheck:
+    """min_volume, but a low-volume subject only warns: its share is noise-level, the others still hold."""
+    check = min_volume(data)
+    if check.status != CheckStatus.FAIL:
+        return check
+    return ReliabilityCheck(check.name, CheckStatus.WARN, f"{check.detail}; low-volume shares are noise-level")
+
+
+def subjects_have_views(data: MetricData) -> ReliabilityCheck:
+    """Fail when no subject has any views: there is nothing to share."""
+    total = sum(sum(bundle.series.views) for _, bundle in _named_bundles(data))
+    if total == 0:
+        return ReliabilityCheck("subjects_have_views", CheckStatus.FAIL, "No subject has any views")
+    return ReliabilityCheck("subjects_have_views", CheckStatus.PASS, f"{total:,} views across all subjects")
+
+
+# ---------------------------------------------------------------------------
 # Aggregation
 # ---------------------------------------------------------------------------
 

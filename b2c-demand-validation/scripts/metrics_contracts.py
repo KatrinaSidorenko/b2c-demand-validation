@@ -122,6 +122,7 @@ class InputParam:
     required: bool = True
     values: list[str] | None = None
     default: str | None = None
+    min_items: int | None = None
 
 
 @dataclass(frozen=True)
