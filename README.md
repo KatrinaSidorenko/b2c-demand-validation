@@ -1,115 +1,91 @@
 # B2C demand validation
 
-A Claude skill that checks whether people care about a product, topic or brand before a business builds, launches or prioritises it. It turns a business question ("Is there enough interest in meal kits to build for?") into a measured answer with a reliability level for every number, a short chat summary and a PDF report.
+A Claude skill that checks whether people care about a product, topic or brand before a business builds, launches or prioritises it. It turns a business question into measured findings, grades how far each one can be trusted, and gives recommendations in the chat and in a PDF report.
 
-The data source is **Wikipedia pageviews** (Wikimedia Analytics API). Pageviews show how much attention a subject gets. They do not measure sales or purchase intent, and the skill says so in every report.
+The data comes from public attention data, which today means Wikipedia pageviews. Pageviews measure attention, not sales or purchase intent.
 
-## Main idea: code computes, the model decides
-A smaller model can make mistakes with numbers, API requests and file names, so the work is split:
+## Idea
+The model running the skill may not be strong, so the skill doesn't rely on its judgement for anything that can be done in code:
 
-| the model | the code |
-|---|---|
-| understands the question and the goal | validates every input before doing any work |
-| picks subjects, articles, metrics, period | builds API requests, retries, fills missing days |
-| decides whether to reuse an analysis folder | names every folder and file |
-| writes the answer and the report text | does all arithmetic, grades reliability, lays out the PDF |
-
-Every script returns JSON with structured errors (`field`, `code`, `detail`), so the model knows exactly what to fix. Nothing is fetched or written until the input is valid.
+- **Code computes, the model decides.** The model understands the question, picks what to measure and writes the conclusions. Code fetches the data, does all the arithmetic, grades reliability and lays out the report.
+- **Reliability is part of every result.** Each number carries a trust level, and the model follows rules on how to word findings at each level, including making no claim at all.
+- **Mistakes are caught before any work is done.** Inputs are validated first, and errors come back structured so the model knows exactly what to fix.
+- **Problems are fixed in code, not only in instructions.** When the model went wrong in real runs, the fix was a rule the code enforces, such as a limit, a check or a fixed file name.
 
 ## Architecture
+The layers are small, and each one depends only on the layer below it:
+
 ```
-SKILL.md                     workflow and rules for the model
-scripts/
-  wiki_client.py             pure pageviews client: one request, (data, error), no retries
-  mediawiki_client.py        pure Action API client: title lookup and search
-  data_resolver.py           subjects + period -> daily series, retries, coverage
-  metrics_registry.py        one MetricDefinition per metric
-  metrics_calc.py            pure calculation functions
-  reliability.py             reliability checks and levels
-  metrics.py                 CLI: catalog, run
-  articles.py                CLI: search, resolve (max 3 lookup rounds per project)
-  workspace.py               CLI: analysis folders and index
-  report.py                  CLI: schema, build (PDF)
-  *_contracts.py             dataclasses only, no I/O
-examples/                    one example spec per metric, report text example
+business question
+      │  model: goal, subjects, audience language, period, metrics
+      ▼
+analysis spec ──► validation ──► data resolver ──► data source client
+                                      │
+                                      ▼
+                        metrics + reliability checks
+                                      │
+                                      ▼
+                         results (values, levels, interpretations)
+                                      │  model: answer and recommendations
+                                      ▼
+                          chat answer + PDF report
 ```
 
-The layers depend only on the layer below: client → resolver → metrics runner → report. The clients stay pure so that retries and error handling live in one place, and so that they can later become MCP tools with little change.
+- **Data source client**: pure. It sends one request and returns the data or an error, with no retries and no business logic. This makes it easy to swap for another source or wrap as an MCP tool.
+- **Data resolver**: turns business terms into requests. A subject is a group of related articles whose views are summed, and a period is a date range. The resolver retries failed requests, keeps partial results when some articles fail, and records data gaps.
+- **Metrics**: each metric is a self-contained definition. It lists the question it answers, when to use it, the data it needs, its calculation, its reliability checks and a sentence template. The model learns about metrics from a generated catalog.
+- **Reliability**: shared checks such as coverage, volume, spikes, fetch errors, freshness and noise produce a trust level for each result.
+- **Workspace**: every analysis gets its own folder, and code names all its files, so a new question never overwrites an earlier one.
+- **Report**: code builds the tables and the reliability summary, and the model supplies only the text. No number in the PDF is typed by the model.
 
-## How it works
-1. **Understand**: the model finds the goal, subjects, audience language (which picks the Wikipedia project) and period.
-2. **Folder**: `workspace.py` creates or reuses an analysis folder under `analyses/`, so a new question never overwrites an earlier one.
-3. **Metrics**: `metrics.py catalog` lists the metrics with when to use each.
-4. **Titles**: `articles.py` checks exact article titles and flags redirects, disambiguation pages and missing titles. The model gets 3 lookup rounds per project, then stops guessing.
-5. **Spec**: the model writes `spec.json`: project, subjects (each a label plus articles whose views are summed), period, baseline, metrics.
-6. **Run**: `metrics.py run` validates the spec, fetches the data, runs reliability checks, computes the values and writes an interpretation sentence for each result.
-7. **Report**: the model answers in chat, then `report.py build` makes the PDF from the results and the model's text. No number in the PDF is typed by the model.
-
-## How data is analysed
-| metric | answers |
-|---|---|
-| `interest_volume` | How big is the interest? (niche / moderate / significant / mass) |
-| `growth_rate` | Is interest growing or falling versus a baseline? |
-| `trend` | Is the direction steady over the period? |
-| `volatility` | Is interest stable or news-driven? |
-| `share_of_voice` | Which option gets the most attention? |
-| `relative_interest` | Is the change real, or overall Wikipedia traffic moving? |
-| `seasonality` | Which months are highest and lowest? |
-| `platform_mix` | Is the audience mobile or desktop? |
-
-**Reliability.** Each result goes through checks such as data coverage, minimum volume, spike dominance, fetch errors, data freshness and signal versus noise. They combine into one level:
-
-| level | meaning | how the model may use it |
-|---|---|---|
-| `high` | all checks pass | state it |
-| `medium` | one warning | state it, explain the warning |
-| `low` | two or more warnings | call it a "weak signal" |
-| `invalid` | a check failed, no value | make no claim |
-
-## How data is compared
-- **Subjects within one project**: `share_of_voice` for attention, and every per-subject metric side by side.
-- **Periods**: `growth_rate` and `relative_interest` compare against a baseline, either `previous_period` or `year_over_year`. Comparisons use average daily views, so periods of different length compare fairly. `relative_interest` divides by total project traffic, which separates real change from overall traffic drift.
-- **Across languages (projects)**: one analysis can have up to 5 projects, e.g. `en.wikipedia` and `uk.wikipedia`, each run separately and joined in one PDF. Absolute numbers are never compared across projects because audiences differ in size. The comparison table shows only metrics marked comparable across projects, which is every metric except `interest_volume`.
+## Data flow
+1. The model turns the question into a spec: which things to compare, in which language editions, over which period, with which metrics.
+2. It looks up the exact article titles before writing the spec, with a limited number of attempts.
+3. Code validates the spec, fetches the daily series, runs the reliability checks, computes the values and writes a plain-language interpretation of each one.
+4. Things are compared in three ways:
+   - **between options**, such as their share of attention;
+   - **between periods**: against the previous period or the same period last year, adjusted for overall traffic change;
+   - **between languages**, using only metrics that are comparable across audiences of different sizes.
+5. The model writes the answer and the recommendations and names the reliability level of each finding. Code renders the PDF.
 
 ## Development process
-The skill was built in small steps. Each step was first written as a design note (goal, decisions, examples, edge cases, "done when"), then built on its own branch and merged through a PR.
+Each step started as a short design note with the goal, the decisions, examples, edge cases and a "done when" line. The step was then built on its own branch and merged through a review.
 
-| steps | what was built | why |
-|---|---|---|
-| 01 | pure pageviews client | keep API access simple and free of business logic |
-| 02 | data resolver | turn business inputs into clean series; retries and partial failures in one place |
-| 03 | metrics framework | contracts, spec validation, reliability, catalog, CLI; no metrics yet |
-| 04–11 | one metric per step | each metric is reviewed and usable on its own, and each adds one new kind of data (baseline, weekly, cross-subject, project aggregate, monthly, per-platform) |
-| 12 | PDF report | a portable result; code owns the numbers, the model owns the words |
-| 13 | analysis folders | several questions in one session no longer overwrite each other |
-| 14 | article title lookup | the model guessed titles and looped on 404s; now it checks them first, with a limited number of rounds |
-| 15 | English-only PDF | the PDF font has no Cyrillic; the rule is enforced in code, and each metric got a plain-language explainer |
-| 16 | multi-project comparison | compare one question across languages without mixing projects in one spec |
+1. **Foundation**: a pure API client, then a resolver that turns business inputs into clean series.
+2. **Metrics framework**: contracts, spec validation, reliability checks, a catalog and a CLI, built before any metric existed.
+3. **One metric per step**: volume, growth, trend, volatility, share of voice, relative interest, seasonality and platform mix. Each metric was usable on its own and added one new kind of data, such as a baseline period, weekly or monthly buckets, whole-project traffic or a per-platform split.
+4. **Report**: a portable PDF in which the code owns the numbers and the model owns the words.
+5. **Fixes from real runs**:
+   - several questions in one session overwrote each other's files, so each analysis got its own folder;
+   - the model guessed article titles and kept retrying after 404 errors, so it now looks titles up first, with a limited number of attempts;
+   - Cyrillic showed up as broken characters in the PDF, so the PDF is now English-only and written in plain words;
+   - comparing languages mixed projects in one spec, so each language is now a separate part of one analysis.
 
-Each problem found in real runs, such as wrong titles, overwritten files or broken letters, was fixed with a rule in code, not only an instruction in SKILL.md.
+## Limitations
+- **One data source**: Wikipedia pageviews measure attention, not demand, sales or intent.
+- **Language, not country**: a Wikipedia edition is a language, so "English readers" is not the same as "the US market".
+- **Absolute volume can't be compared across languages** because audiences differ in size.
+- **Article choice drives results**: a broad article outweighs narrow ones, and titles in different languages are matched by hand.
+- **English-only PDF**, with text and tables only and no charts.
+- **No automated tests**: each step was checked by hand against the real API.
+- **Permission prompts**: running the scripts asks the user for approval often.
+
+## Further development
+- **MCP for data**: move the clients behind MCP tools, and add more sources such as search trends, app stores, marketplaces and social platforms.
+- **Tests**: unit tests for the calculations and checks, recorded API responses for the resolver, and end-to-end runs of the example specs.
+- **RAG for product context**: give the model product-specific knowledge such as segments, competitors, past analyses and business goals, so it picks better subjects and makes recommendations that fit the business.
+- **Geography**: resolve countries through the top-by-country data, and map markets to the right languages and projects.
+- **Cross-language matching**: link articles between languages automatically, and normalise volume by project size so it can be compared across languages.
+- **Report**: a Unicode font for non-Latin scripts, and charts.
+- **Smoother runs**: pre-approved tools so users see fewer permission prompts, caching of fetched data, and one command that runs every project of an analysis.
 
 ## Install the skill
 Requires Python 3.10+.
 
-1. Copy the `b2c-demand-validation/` folder (the one with `SKILL.md`) into a skills folder:
-   - for all your projects: `~/.claude/skills/b2c-demand-validation/`
-   - for one project: `<project>/.claude/skills/b2c-demand-validation/`
-
+1. Copy the `b2c-demand-validation/` folder (the one with `SKILL.md`) into `~/.claude/skills/` for all your projects, or into `<project>/.claude/skills/` for one project. For claude.ai, zip the folder and upload it under **Settings → Capabilities → Skills**.
    ```bash
    git clone https://github.com/KatrinaSidorenko/b2c-demand-validation.git
    cp -r b2c-demand-validation/b2c-demand-validation ~/.claude/skills/
-   ```
-   For claude.ai, zip the folder and upload it under **Settings → Capabilities → Skills**.
-2. Install the dependencies:
-   ```bash
    pip install -r ~/.claude/skills/b2c-demand-validation/requirements.txt
    ```
-3. Ask Claude a demand question, for example: *"Is interest in meal kits growing among English readers?"* The skill loads on its own.
-
-Analyses are saved to `analyses/` in the working directory.
-
-## Limitations
-- One data source: Wikipedia pageviews, a proxy for attention.
-- A project is a language, not a country. Geography is not covered yet.
-- The PDF is English only.
-- No automated tests yet. Each step was checked by hand against the real API.
+2. Ask a demand question, for example *"Is interest in meal kits growing among English readers?"* Claude loads the skill on its own.
