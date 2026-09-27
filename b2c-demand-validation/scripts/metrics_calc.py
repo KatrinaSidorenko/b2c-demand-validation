@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from math import inf, sqrt
-from statistics import mean, median, stdev
+from statistics import correlation, mean, median, stdev
 
 # interest_volume size bands, on median daily views
 VOLUME_BANDS = [(50, "niche"), (500, "moderate"), (5000, "significant")]
@@ -34,6 +34,14 @@ GROWTH_TOP_BAND = "strong growth"
 
 # share_of_voice: the top two shares are a tie when they are this close
 SHARE_TIE_WITHIN = 0.05
+
+# seasonality: a month is a peak / low when its index is at least / at most this
+SEASON_PEAK_FROM = 1.15
+SEASON_LOW_TO = 0.85
+# seasonality strength bands, on the amplitude: each band holds values below its upper bound
+SEASONALITY_BANDS = [(1.3, "no real"), (2.0, "moderate")]
+SEASONALITY_TOP_BAND = "strong"
+MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
 def interest_volume(views: list[int], expected_days: int) -> dict[str, float | int]:
@@ -190,6 +198,55 @@ def weekly_ratio(dates: list[str], views: list[int], denominator: list[int]) -> 
     """Monday-Sunday sums of `views` over those of `denominator`, for full weeks where the denominator has views."""
     weeks = zip(resample_weekly(dates, views), resample_weekly(dates, denominator))
     return [part / whole for part, whole in weeks if whole]
+
+
+def seasonal_years(dates: list[str], views: list[int]) -> list[dict[int, int]]:
+    """Split a monthly series into 12-month years, {month number: views}, counted back from the last month.
+
+    Aligning to the end keeps the most recent data; leftover months at the start are dropped.
+    """
+    months = list(zip(dates, views))
+    months = months[len(months) % 12 :]
+    return [{int(d[5:7]): v for d, v in months[i : i + 12]} for i in range(0, len(months), 12)]
+
+
+def seasonality(dates: list[str], views: list[int]) -> dict[str, list[float] | list[str] | float | None]:
+    """Average monthly profile, Jan..Dec, with each year normalised by its own mean (1.0 = average month).
+
+    Normalising per year removes the year-to-year trend. Years without views are skipped.
+    amplitude is None when a month has no views at all.
+    Raises ZeroDivisionError when no year has views.
+    """
+    years = [year for year in seasonal_years(dates, views) if sum(year.values())]
+    if not years:
+        raise ZeroDivisionError("no year of the period has views")
+    index = [round(mean(year[m] / mean(year.values()) for year in years), 2) for m in range(1, 13)]
+    return {
+        "index": index,
+        "peak_months": [MONTH_NAMES[m] for m, value in enumerate(index) if value >= SEASON_PEAK_FROM],
+        "low_months": [MONTH_NAMES[m] for m, value in enumerate(index) if value <= SEASON_LOW_TO],
+        "amplitude": round(max(index) / min(index), 2) if min(index) else None,
+    }
+
+
+def seasonality_band(amplitude: float | None) -> str:
+    """no real < 1.3, moderate 1.3 .. 2, strong above (and when a month has no views)."""
+    if amplitude is None:
+        return SEASONALITY_TOP_BAND
+    for upper, band in SEASONALITY_BANDS:
+        if amplitude < upper:
+            return band
+    return SEASONALITY_TOP_BAND
+
+
+def seasonal_consistency(years: list[dict[int, int]]) -> float | None:
+    """Mean Pearson correlation between the monthly profiles of every pair of years.
+
+    Years with no variation have no profile to correlate and are skipped; None when no pair is left.
+    """
+    profiles = [[year[m] for m in range(1, 13)] for year in years if len(set(year.values())) > 1]
+    pairs = [correlation(a, b) for i, a in enumerate(profiles) for b in profiles[i + 1 :]]
+    return round(mean(pairs), 2) if pairs else None
 
 
 def share_of_voice(totals: dict[str, int]) -> dict[str, float]:
