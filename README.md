@@ -67,6 +67,7 @@ Each step started as a short design note with the goal, the decisions, examples,
 - **Absolute volume can't be compared across languages** because audiences differ in size.
 - **Article choice drives results**: a broad article outweighs narrow ones, and titles in different languages are matched by hand.
 - **English-only PDF**, with text and tables only and no charts.
+- **No data caching**: every run fetches all data from the API again, even when an analysis is only refined. Large runs are slow and can hit API rate limits. These include many subjects, long periods, and platform mix, which makes three requests per article.
 - **No automated tests**: each step was checked by hand against the real API.
 - **Permission prompts**: running the scripts asks the user for approval often.
 
